@@ -213,6 +213,27 @@ class WindowsWireGuardBackend(WireGuardBackend):
         except Exception as exc:
             raise BackendError(f"Cannot update the WireGuard tray startup registration: {exc}") from exc
 
+    def _controller_service_trigger(self, tunnel_name: str, enabled: bool) -> None:
+        """Launch the per-user tray after this tunnel service enters RUNNING."""
+        task_name = f"Omada WireGuard Tray - {tunnel_name}"
+        if not enabled:
+            self._run(["schtasks.exe", "/delete", "/tn", task_name, "/f"], ok=(0, 1))
+            return
+        user = os.environ.get("USERDOMAIN", "")
+        username = os.environ.get("USERNAME", "")
+        account = f"{user}\\{username}" if user and username else username
+        if not account:
+            raise BackendError("Cannot determine the signed-in user for the tray trigger")
+        event_query = (
+            "*[System[Provider[@Name='Service Control Manager'] and EventID=7036] "
+            f"and EventData[Data='{self._service(tunnel_name)}'] and EventData[Data='running']]")
+        self._run([
+            "schtasks.exe", "/create", "/tn", task_name,
+            "/tr", f'"{self.controller_executable}" --tray',
+            "/sc", "onevent", "/ec", "System", "/mo", event_query,
+            "/ru", account, "/it", "/rl", "LIMITED", "/f",
+        ])
+
     def _grant_interactive_service_controls(self, tunnel_name: str) -> None:
         service = self._service(tunnel_name)
         result = self._run(["sc.exe", "sdshow", service])
@@ -243,6 +264,7 @@ class WindowsWireGuardBackend(WireGuardBackend):
         # Remove shortcuts produced by older builds and use the machine Run key.
         self._controller_shortcut("Startup", False)
         self._controller_autostart(start_with_windows)
+        self._controller_service_trigger(tunnel_name, True)
         if launch_manager:
             self.launch_controller()
 
@@ -290,3 +312,4 @@ class WindowsWireGuardBackend(WireGuardBackend):
         self._controller_shortcut("Desktop", False)
         self._controller_shortcut("Startup", False)
         self._controller_autostart(False)
+        self._controller_service_trigger(tunnel_name, False)

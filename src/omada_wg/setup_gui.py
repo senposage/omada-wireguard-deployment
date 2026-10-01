@@ -12,7 +12,7 @@ from typing import Any
 from .credentials import CloudCredentials
 from .cloud_discovery import CloudController, CloudDiscoveryClient
 from .deployment_setup import DeploymentTarget, routes, write_deployment
-from .drive_mapping import parse_drive_maps
+from .drive_mapping import DriveMapping, parse_drive_maps
 from .errors import EnrollmentError
 from .package_builder import build_self_extracting
 
@@ -25,8 +25,8 @@ class SetupWizard:
         self.tk, self.ttk = tk, ttk
         self.root = tk.Tk()
         self.root.title("Company VPN Deployment Builder")
-        self.root.geometry("790x860")
-        self.root.minsize(720, 760)
+        self.root.geometry("860x930")
+        self.root.minsize(760, 820)
         icon_roots = [Path(getattr(sys, "_MEIPASS", "")), Path(__file__).resolve().parents[2]]
         for root in icon_roots:
             icon = root / "assets" / "omada-vpn-icon.png"
@@ -44,12 +44,12 @@ class SetupWizard:
         self.sites: list[dict[str, Any]] = []
         self.servers: list[dict[str, Any]] = []
         self.profile_selection: dict[str, str] = {}
+        self.drive_mappings: list[DriveMapping] = []
         self.vars = {name: tk.StringVar(value=value) for name, value in {
             "email": "", "password": "", "controller": "", "site": "", "server": "",
             "endpoint": "", "dns": "", "route": "Site networks", "routes": "",
             "keepalive": "", "mtu": "", "tunnel": "omada",
             "name_mode": "Computer and user", "custom_name": "",
-            "drive_maps": "",
             "office_disconnect": "0",
             "output": str(((Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
                             else Path.cwd() / "outputs") / "Omada-WireGuard-Deployment.exe").resolve()),
@@ -129,24 +129,53 @@ class SetupWizard:
         self.name_help = ttk.Label(
             network, text="Default example: DESKTOP_NAME_ben", foreground="#52606d")
         self.name_help.grid(row=11, column=1, sticky="w")
-        self._row(network, 12, "Drive mappings (optional)", "drive_maps")
-        ttk.Label(
-            network,
-            text=r"Separate multiple maps with semicolons. Example: Z:=\\nas.example.com\Shared",
-            foreground="#52606d",
-        ).grid(row=13, column=1, sticky="w")
         self.office_disconnect = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            network, text="Disconnect VPN when the office DNS suffix is present",
-            variable=self.office_disconnect,
-        ).grid(row=14, column=1, sticky="w", pady=(4, 0))
-        ttk.Label(
-            network,
-            text="Uses the FQDN in the drive mappings and ignores the WireGuard adapter.",
-            foreground="#52606d",
-        ).grid(row=15, column=1, sticky="w")
+        self.remove_credentials = tk.BooleanVar(value=False)
         self._route_changed()
         self._name_mode_changed()
+
+        drives = ttk.LabelFrame(outer, text="Drive mappings", padding=14)
+        drives.grid(sticky="ew", pady=5)
+        drives.columnconfigure(1, weight=1)
+        drives.columnconfigure(2, weight=1)
+        drives.columnconfigure(3, weight=1)
+        self.map_tree = ttk.Treeview(
+            drives, columns=("letter", "vpn", "lan"), show="headings", height=3)
+        for column, heading, width in (
+                ("letter", "Drive", 70), ("vpn", "VPN / FQDN share", 310),
+                ("lan", "LAN restore share", 310)):
+            self.map_tree.heading(column, text=heading)
+            self.map_tree.column(column, width=width, stretch=column != "letter")
+        self.map_tree.grid(row=0, column=0, columnspan=5, sticky="ew")
+        self.map_tree.bind("<<TreeviewSelect>>", self._select_drive_mapping)
+        self.map_letter = tk.StringVar(value="X:")
+        self.map_vpn_path = tk.StringVar()
+        self.map_lan_path = tk.StringVar()
+        ttk.Label(drives, text="Drive").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Combobox(
+            drives, textvariable=self.map_letter, state="readonly", width=6,
+            values=tuple(f"{letter}:" for letter in "DEFGHIJKLMNOPQRSTUVWXYZ"),
+        ).grid(row=2, column=0, sticky="w")
+        ttk.Label(drives, text="VPN / FQDN share").grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+        ttk.Entry(drives, textvariable=self.map_vpn_path).grid(row=2, column=1, sticky="ew", padx=(8, 0))
+        ttk.Label(drives, text="LAN restore share").grid(row=1, column=2, sticky="w", padx=(8, 0), pady=(8, 0))
+        ttk.Entry(drives, textvariable=self.map_lan_path).grid(row=2, column=2, sticky="ew", padx=(8, 0))
+        buttons = ttk.Frame(drives)
+        buttons.grid(row=2, column=3, columnspan=2, padx=(8, 0))
+        ttk.Button(buttons, text="Add / update", command=self._save_drive_mapping).pack(side="left")
+        ttk.Button(buttons, text="Remove", command=self._remove_drive_mapping).pack(side="left", padx=(6, 0))
+        ttk.Label(
+            drives, text="The VPN path is used while connected; the LAN path is always restored on disconnect.",
+            foreground="#52606d",
+        ).grid(row=3, column=1, columnspan=3, sticky="w", pady=(5, 0))
+        ttk.Checkbutton(
+            drives, text="Disconnect VPN when the office DNS suffix is present",
+            variable=self.office_disconnect,
+        ).grid(row=4, column=1, columnspan=3, sticky="w", pady=(4, 0))
+        ttk.Checkbutton(
+            drives, text="Delete deployment credentials after enrollment (manual Omada peer removal)",
+            variable=self.remove_credentials,
+        ).grid(row=5, column=1, columnspan=3, sticky="w", pady=(4, 0))
 
         package = ttk.LabelFrame(outer, text="Deployment output", padding=14)
         package.grid(sticky="ew", pady=5)
@@ -171,6 +200,46 @@ class SetupWizard:
         if selected:
             self.vars["output"].set(selected)
 
+    def _refresh_drive_mapping_tree(self) -> None:
+        for item in self.map_tree.get_children():
+            self.map_tree.delete(item)
+        for mapping in self.drive_mappings:
+            self.map_tree.insert("", "end", iid=mapping.letter, values=(
+                mapping.letter, mapping.path, mapping.restore_path or ""))
+
+    def _select_drive_mapping(self, _event=None) -> None:
+        selected = self.map_tree.selection()
+        if not selected:
+            return
+        mapping = next((item for item in self.drive_mappings if item.letter == selected[0]), None)
+        if mapping:
+            self.map_letter.set(mapping.letter)
+            self.map_vpn_path.set(mapping.path)
+            self.map_lan_path.set(mapping.restore_path or "")
+
+    def _save_drive_mapping(self) -> None:
+        from tkinter import messagebox
+        try:
+            # Reuse the parser solely as validation for one structured row.
+            mapping = parse_drive_maps(
+                f"{self.map_letter.get()}={self.map_vpn_path.get()} | {self.map_lan_path.get()}")[0]
+        except (EnrollmentError, IndexError) as exc:
+            messagebox.showerror("Invalid drive mapping", str(exc), parent=self.root)
+            return
+        self.drive_mappings = [item for item in self.drive_mappings if item.letter != mapping.letter]
+        self.drive_mappings.append(mapping)
+        self.drive_mappings.sort(key=lambda item: item.letter)
+        self._refresh_drive_mapping_tree()
+
+    def _remove_drive_mapping(self) -> None:
+        selected = self.map_tree.selection()
+        if not selected:
+            return
+        self.drive_mappings = [item for item in self.drive_mappings if item.letter != selected[0]]
+        self._refresh_drive_mapping_tree()
+        self.map_vpn_path.set("")
+        self.map_lan_path.set("")
+
     @staticmethod
     def output_for_site(path: str | Path, site_name: str) -> Path:
         output = Path(path).resolve()
@@ -192,8 +261,13 @@ class SetupWizard:
             return
         values = {key: self.vars[key].get() for key in (
             "email", "endpoint", "dns", "route", "routes", "keepalive", "mtu",
-            "tunnel", "name_mode", "custom_name", "drive_maps", "output")}
+            "tunnel", "name_mode", "custom_name", "output")}
+        values["drive_maps"] = [
+            {"letter": item.letter, "path": item.path, "restore_path": item.restore_path}
+            for item in self.drive_mappings
+        ]
         values["office_disconnect"] = self.office_disconnect.get()
+        values["remove_credentials_after_enroll"] = self.remove_credentials.get()
         profile = {
             "version": 1,
             "values": values,
@@ -228,7 +302,21 @@ class SetupWizard:
         for key, value in profile["values"].items():
             if key in self.vars and key not in {"password", "status"}:
                 self.vars[key].set(str(value or ""))
+        saved_maps = profile["values"].get("drive_maps", [])
+        try:
+            if isinstance(saved_maps, str):
+                self.drive_mappings = parse_drive_maps(saved_maps)
+            else:
+                self.drive_mappings = [DriveMapping(
+                    str(item["letter"]), str(item["path"]),
+                    str(item.get("restore_path") or "") or None)
+                    for item in saved_maps]
+        except (TypeError, KeyError, EnrollmentError) as exc:
+            messagebox.showerror("Cannot load configuration", f"Invalid drive mappings: {exc}", parent=self.root)
+            return
+        self._refresh_drive_mapping_tree()
         self.office_disconnect.set(bool(profile["values"].get("office_disconnect", False)))
+        self.remove_credentials.set(bool(profile["values"].get("remove_credentials_after_enroll", False)))
         self.profile_selection = {
             key: str(profile.get(key) or "") for key in
             ("controller_name", "site_name", "server_name")
@@ -416,7 +504,9 @@ class SetupWizard:
             if not route_mode:
                 raise EnrollmentError("Select a traffic routing option")
             allowed_routes = routes(route_mode, self.vars["routes"].get())
-            drive_maps = parse_drive_maps(self.vars["drive_maps"].get())
+            drive_maps = list(self.drive_mappings)
+            if any(not mapping.restore_path for mapping in drive_maps):
+                raise EnrollmentError("Every drive mapping requires both VPN and LAN restore paths")
             if self.office_disconnect.get() and not any(
                     "." in mapping.path[2:].split("\\", 1)[0] for mapping in drive_maps):
                 raise EnrollmentError(
@@ -447,6 +537,7 @@ class SetupWizard:
                 client_custom_name=self.vars["custom_name"].get().strip() or None,
                 drive_maps=drive_maps,
                 disconnect_on_office_dns=self.office_disconnect.get(),
+                remove_credentials_after_enroll=self.remove_credentials.get(),
             )
         except Exception as exc:
             if temporary:

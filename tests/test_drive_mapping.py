@@ -79,6 +79,18 @@ class DriveMappingTests(unittest.TestCase):
             manager.disconnect()
             self.assertNotIn("Z:", provider.drives)
 
+    def test_explicit_lan_restore_path_is_used_without_a_previous_mapping(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary) / "maps.json"
+            provider = FakeDriveProvider()
+            manager = DriveMappingManager(
+                [DriveMapping(
+                    "S:", r"\\nas.dimlaw.local\shared\Scans",
+                    r"\\DRK-NAS9B372E\shared\Scans")], state, provider)
+            manager.connect()
+            manager.disconnect()
+            self.assertEqual(provider.drives["S:"], r"\\DRK-NAS9B372E\shared\Scans")
+
     def test_existing_target_is_left_untouched(self):
         with tempfile.TemporaryDirectory() as temporary:
             provider = FakeDriveProvider({"Z:": r"\\nas.example.com\Shared"})

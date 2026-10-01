@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import secrets
-
 from .api import OmadaClient
 from .backend import WireGuardBackend
 from .configgen import generate_config
@@ -30,15 +28,6 @@ class EnrollmentService:
             raise EnrollmentError(f"Multiple Omada clients are named {name!r}; refusing to guess")
         return named[0] if named else None
 
-    @staticmethod
-    def _replacement_name(name: str, server: WireGuardServer) -> str:
-        used = {peer.name.casefold() for peer in server.clients}
-        for _ in range(20):
-            candidate = f"{name[:40]}_new_{secrets.token_hex(4)}"
-            if candidate.casefold() not in used:
-                return candidate
-        raise EnrollmentError("Could not allocate a unique temporary Omada client name")
-
     def _render(self, server: WireGuardServer, peer: WireGuardPeer) -> str:
         endpoint = self.config.endpoint_fallback
         if not endpoint:
@@ -50,17 +39,45 @@ class EnrollmentService:
             keepalive=self.config.keepalive, mtu=self.config.mtu,
         )
 
-    def enroll(self, *, name: str | None = None, install: bool = True) -> EnrollmentState:
+    def existing_peer(self, *, name: str | None = None) -> WireGuardPeer | None:
         name = name or client_name(self.config.client_name_mode, self.config.client_custom_name)
         self.api.validate_session()
         server = self.api.find_server()
-        stale_peer = self._find_existing(server, name)
-        previous_config = self._render(server, stale_peer) if stale_peer and install else None
-        create_name = self._replacement_name(name, server) if stale_peer else name
+        return self._find_existing(server, name)
+
+    def enroll(self, *, name: str | None = None, install: bool = True,
+               re_enroll: bool = False) -> EnrollmentState:
+        name = name or client_name(self.config.client_name_mode, self.config.client_custom_name)
+        self.api.validate_session()
+        server = self.api.find_server()
+        existing_peer = self._find_existing(server, name)
+        if existing_peer:
+            if re_enroll:
+                server = self.api.delete_client(server, existing_peer.id)
+                self.state.clear()
+                if install:
+                    self.backend.remove(self.config.tunnel_name)
+            else:
+                # An ordinary installer rerun is a local repair/update. Do not alter
+                # the controller peer or issue a PATCH just to recreate identical keys.
+                rendered = self._render(server, existing_peer)
+                if install:
+                    self.backend.install_and_start(self.config.tunnel_name, rendered)
+                    self.backend.configure_access(
+                        self.config.tunnel_name,
+                        desktop_shortcut=self.config.desktop_shortcut,
+                        launch_manager=False,
+                        start_with_windows=self.config.start_with_windows,
+                    )
+                result = EnrollmentState(server.id, existing_peer.id, existing_peer.name,
+                                         self.config.tunnel_name)
+                self.state.save(result)
+                return result
+
         peer = None
         created_this_run = False
-        server = self.api.create_client(server, create_name)
-        matches = [p for p in server.clients if p.name.casefold() == create_name.casefold()]
+        server = self.api.create_client(server, name)
+        matches = [p for p in server.clients if p.name.casefold() == name.casefold()]
         if len(matches) != 1:
             raise EnrollmentError("Omada did not return exactly one newly created client")
         peer = matches[0]
@@ -76,14 +93,6 @@ class EnrollmentService:
                     launch_manager=False,
                     start_with_windows=self.config.start_with_windows,
                 )
-            if stale_peer:
-                server = self.api.replace_client(server, stale_peer.id, peer.id, name)
-                replacement = [item for item in server.clients
-                               if item.public_key == peer.public_key and
-                               item.name.casefold() == name.casefold()]
-                if len(replacement) != 1:
-                    raise EnrollmentError("Omada did not return the finalized replacement client")
-                peer = replacement[0]
             result = EnrollmentState(server.id, peer.id, peer.name, self.config.tunnel_name)
             self.state.save(result)
             return result
@@ -92,16 +101,7 @@ class EnrollmentService:
             if created_this_run:
                 if install:
                     try:
-                        if previous_config:
-                            self.backend.install_and_start(self.config.tunnel_name, previous_config)
-                            self.backend.configure_access(
-                                self.config.tunnel_name,
-                                desktop_shortcut=self.config.desktop_shortcut,
-                                launch_manager=False,
-                                start_with_windows=self.config.start_with_windows,
-                            )
-                        else:
-                            self.backend.remove(self.config.tunnel_name)
+                        self.backend.remove(self.config.tunnel_name)
                     except Exception as exc:
                         cleanup_errors.append(f"local tunnel cleanup failed: {exc}")
                 try:

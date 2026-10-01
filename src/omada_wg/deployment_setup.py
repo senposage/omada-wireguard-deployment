@@ -42,7 +42,8 @@ def write_deployment(output: Path, target: DeploymentTarget,
                      desktop_shortcut: bool = True, launch_manager: bool = True,
                      start_with_windows: bool = True,
                      drive_maps: list[DriveMapping] | None = None,
-                     disconnect_on_office_dns: bool = False) -> Path:
+                     disconnect_on_office_dns: bool = False,
+                     remove_credentials_after_enroll: bool = False) -> Path:
     site_id = str(site.get("id") or site.get("siteId") or "")
     if not site_id:
         raise EnrollmentError("Selected site did not contain an ID")
@@ -73,10 +74,12 @@ def write_deployment(output: Path, target: DeploymentTarget,
         "launch_manager": launch_manager,
         "start_with_windows": start_with_windows,
         "drive_maps": [
-            {"letter": mapping.letter, "path": mapping.path}
+            {"letter": mapping.letter, "path": mapping.path,
+             **({"restore_path": mapping.restore_path} if mapping.restore_path else {})}
             for mapping in (drive_maps or [])
         ],
         "disconnect_on_office_dns": disconnect_on_office_dns,
+        "remove_credentials_after_enroll": remove_credentials_after_enroll,
         "state_path": r"%ProgramData%\OmadaWireGuard\enrollment.json",
         "credentials_file": credentials_path.name,
         "credential_key": PortableCredentialStore.encode_key(key),

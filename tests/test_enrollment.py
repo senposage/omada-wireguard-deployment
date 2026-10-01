@@ -54,7 +54,7 @@ class FailingBackend(FakeBackend):
 
 
 class EnrollmentTests(unittest.TestCase):
-    def test_existing_named_peer_is_replaced_and_state_saved(self):
+    def test_existing_named_peer_is_reused_without_an_omada_patch(self):
         peer = WireGuardPeer("p1", "LAPTOP", "10.0.8.2", "pub", "private", allowed_addresses=("10.1.2.3/24",))
         server = WireGuardServer("s1", "DRKNET", "server-pub", 51820, 25, (peer,))
         with tempfile.TemporaryDirectory() as directory:
@@ -64,11 +64,27 @@ class EnrollmentTests(unittest.TestCase):
                                    state_path=Path(directory) / "state.json")
             api, backend = FakeApi(server), FakeBackend()
             result = EnrollmentService(cfg, api, backend, StateStore(cfg.state_path)).enroll(name="laptop")
-            self.assertEqual(result.client_id, "new-peer")
-            self.assertEqual(api.created, 1)
-            self.assertEqual(api.replaced, ("p1", "new-peer", "laptop"))
+            self.assertEqual(result.client_id, "p1")
+            self.assertEqual(api.created, 0)
+            self.assertIsNone(api.replaced)
             self.assertIn("AllowedIPs = 10.1.2.0/24", backend.config)
             self.assertEqual(StateStore(cfg.state_path).load(), result)
+
+    def test_explicit_reenroll_deletes_existing_peer_then_creates_one(self):
+        peer = WireGuardPeer("p1", "LAPTOP", "10.0.8.2", "pub", "private")
+        server = WireGuardServer("s1", "DRKNET", "server-pub", 51820, 25, (peer,))
+        with tempfile.TemporaryDirectory() as directory:
+            cfg = DeploymentConfig(
+                "https://example", "d", "o", "site", server_name="DRKNET",
+                endpoint_fallback="vpn.example", site_routes=("192.168.1.0/24",),
+                state_path=Path(directory) / "state.json")
+            api, backend = FakeApi(server), FakeBackend()
+            result = EnrollmentService(cfg, api, backend, StateStore(cfg.state_path)).enroll(
+                name="laptop", re_enroll=True)
+            self.assertEqual(api.deleted, "p1")
+            self.assertEqual(api.created, 1)
+            self.assertEqual(result.client_id, "new-peer")
+            self.assertEqual(backend.removed, "omada")
 
     def test_uses_discovered_site_routes_without_changing_peer(self):
         peer = WireGuardPeer("p1", "LAPTOP", "10.0.8.2", "pub", "private")

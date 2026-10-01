@@ -82,8 +82,19 @@ def _runtime_service(config_path: Path) -> tuple[DeploymentConfig, EnrollmentSer
 
 
 def _unenroll(config_path: Path) -> bool:
-    _, service = _runtime_service(config_path)
-    return service.unenroll()
+    config = DeploymentConfig.load(config_path)
+    try:
+        _, service = _runtime_service(config_path)
+        return service.unenroll()
+    except EnrollmentError:
+        if not config.remove_credentials_after_enroll:
+            raise
+        display_name = f"Company: {config.site_name} VPN" if config.site_name else "Company VPN"
+        backend = WindowsWireGuardBackend(
+            controller_executable=_installed_executable(config.site_name), display_name=display_name)
+        backend.remove(config.tunnel_name)
+        StateStore(config.state_path).clear()
+        return False
 
 
 def _install_location() -> Path:
@@ -139,6 +150,16 @@ def _register_uninstaller(config_path: Path) -> None:
         winreg.SetValueEx(key, "NoRepair", 0, winreg.REG_DWORD, 1)
 
 
+def _discard_installed_credentials(config: DeploymentConfig) -> None:
+    if not config.remove_credentials_after_enroll or not config.credentials_file:
+        return
+    installed = _install_location() / Path(config.credentials_file).name
+    try:
+        installed.unlink()
+    except FileNotFoundError:
+        pass
+
+
 def _remove_registration_and_files(config_path: Path) -> None:
     import winreg
 
@@ -192,8 +213,10 @@ def main() -> int:
                 _unenroll(config_path)
                 _remove_registration_and_files(config_path)
             else:
-                _enroll(config_path)
+                config, service = _runtime_service(config_path)
+                service.enroll()
                 _register_uninstaller(config_path)
+                _discard_installed_credentials(config)
             return 0
         except Exception:
             return 2
@@ -230,6 +253,8 @@ def main() -> int:
     boot_option = ttk.Checkbutton(
         frame, text="Start Company VPN automatically with Windows", variable=boot_enabled)
     finish_button = ttk.Button(frame, text="Finish")
+    update_button = ttk.Button(frame, text="Update this VPN")
+    repair_button = ttk.Button(frame, text="Repair / re-enroll")
     working = True
     exit_code = 0
 
@@ -252,8 +277,14 @@ def main() -> int:
                 _remove_registration_and_files(config_path)
                 result = None
             else:
-                result = _enroll(config_path)
+                _, service = _runtime_service(config_path)
+                existing = service.existing_peer()
+                if existing:
+                    root.after(0, lambda: existing_peer_found(service, existing.name))
+                    return
+                result = service.enroll()
                 _register_uninstaller(config_path)
+                _discard_installed_credentials(service.config)
         except Exception as exc:
             root.after(0, lambda detail=str(exc): failed(detail))
         else:
@@ -280,6 +311,42 @@ def main() -> int:
             boot_option.pack(pady=(10, 5))
             finish_button.configure(command=finish_install)
             finish_button.pack(pady=(8, 0))
+
+    def existing_peer_found(service: EnrollmentService, peer_name: str) -> None:
+        nonlocal working
+        working = False
+        progress.stop()
+        status.set(f"Existing Omada peer found: {peer_name}")
+
+        def run_existing(re_enroll: bool) -> None:
+            nonlocal working
+            if re_enroll and not messagebox.askyesno(
+                    "Repair / re-enroll",
+                    "This deletes the existing Omada peer, then creates a completely new enrollment. Continue?",
+                    parent=root):
+                return
+            working = True
+            update_button.pack_forget()
+            repair_button.pack_forget()
+            progress.start(12)
+            status.set("Repairing VPN enrollment…" if re_enroll else "Updating local VPN configuration…")
+
+            def update_work() -> None:
+                try:
+                    result = service.enroll(re_enroll=re_enroll)
+                    _register_uninstaller(config_path)
+                    _discard_installed_credentials(service.config)
+                except Exception as exc:
+                    root.after(0, lambda detail=str(exc): failed(detail))
+                else:
+                    root.after(0, lambda: succeeded(result.client_name))
+
+            threading.Thread(target=update_work, daemon=False).start()
+
+        update_button.configure(command=lambda: run_existing(False))
+        repair_button.configure(command=lambda: run_existing(True))
+        update_button.pack(pady=(8, 0))
+        repair_button.pack(pady=(6, 0))
 
     def finish_install() -> None:
         try:

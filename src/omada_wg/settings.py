@@ -43,6 +43,7 @@ class DeploymentConfig:
     start_with_windows: bool = True
     drive_maps: tuple[DriveMapping, ...] = ()
     disconnect_on_office_dns: bool = False
+    remove_credentials_after_enroll: bool = False
 
     @classmethod
     def load(cls, path: str | Path) -> "DeploymentConfig":
@@ -73,14 +74,17 @@ class DeploymentConfig:
             try:
                 letter = normalize_drive_letter(str(item["letter"]))
                 remote_path = str(item["path"]).strip().rstrip("\\")
+                restore_path = str(item.get("restore_path") or "").strip().rstrip("\\") or None
             except (KeyError, TypeError) as exc:
                 raise ConfigurationError("Each drive mapping requires letter and path") from exc
             if not re.fullmatch(r"\\\\[^\\/]+\\.+", remote_path):
                 raise ConfigurationError(f"Drive {letter} requires a UNC path")
+            if restore_path and not re.fullmatch(r"\\\\[^\\/]+\\.+", restore_path):
+                raise ConfigurationError(f"Drive {letter} requires a UNC LAN restore path")
             if letter in seen_drives:
                 raise ConfigurationError(f"Drive {letter} is configured more than once")
             seen_drives.add(letter)
-            drive_maps.append(DriveMapping(letter, remote_path))
+            drive_maps.append(DriveMapping(letter, remote_path, restore_path))
         state_path = Path(os.path.expandvars(data.get("state_path", "omada-wg-state.json")))
         if not state_path.is_absolute():
             state_path = source.parent / state_path
@@ -110,6 +114,7 @@ class DeploymentConfig:
             start_with_windows=bool(data.get("start_with_windows", True)),
             drive_maps=tuple(drive_maps),
             disconnect_on_office_dns=bool(data.get("disconnect_on_office_dns", False)),
+            remove_credentials_after_enroll=bool(data.get("remove_credentials_after_enroll", False)),
             wireguard_msi_dir=(source.parent / data["wireguard_msi_dir"]).resolve()
             if data.get("wireguard_msi_dir") and not Path(data["wireguard_msi_dir"]).is_absolute()
             else (Path(data["wireguard_msi_dir"]) if data.get("wireguard_msi_dir") else None),

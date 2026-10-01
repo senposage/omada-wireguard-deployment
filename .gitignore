@@ -1,0 +1,23 @@
+# Generated deployment packages and local administrator profiles
+outputs/
+archive/
+work/
+
+# Credential and session material
+*.credentials.bin
+*.session.dpapi
+deployment.credentials.bin
+deployment.session.dpapi
+
+# Python and packaging output
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+*.spec
+
+# Editor and OS files
+.vscode/
+.idea/
+Thumbs.db

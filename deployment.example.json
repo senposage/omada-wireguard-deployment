@@ -1,0 +1,20 @@
+{
+  "connector_base_url": "https://use1-api-omada-controller-connector.tplinkcloud.com",
+  "device_id": "REPLACE_ME",
+  "omada_id": "REPLACE_ME",
+  "site_id": "REPLACE_ME",
+  "user_id": "REPLACE_ME",
+  "server_name": "REPLACE_ME",
+  "endpoint_fallback": "vpn.example.com",
+  "dns": "192.0.2.53",
+  "route_mode": "site",
+  "allowed_ips": [],
+  "tunnel_name": "omada",
+  "client_name_mode": "computer_user",
+  "client_custom_name": null,
+  "state_path": "omada-wg-state.json",
+  "session_file": "deployment.session.dpapi",
+  "credentials_file": "deployment.credentials.dpapi",
+  "wireguard_msi_dir": "wireguard",
+  "write_enabled": false
+}

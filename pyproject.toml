@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omada-wg-enroll"
+version = "0.1.0"
+description = "Idempotent Omada Client-to-Site WireGuard enrollment"
+requires-python = ">=3.11"
+dependencies = ["cryptography>=43"]
+
+[project.scripts]
+omada-wg = "omada_wg.cli:main"
+omada-wg-setup = "omada_wg.setup_browser:main"
+omada-wg-setup-gui = "omada_wg.setup_gui:main"
+omada-wg-deploy = "omada_wg.deploy_app:main"
+omada-wg-package = "omada_wg.package_builder:main"
+
+[project.optional-dependencies]
+setup = ["playwright>=1.48"]
+build = ["pyinstaller>=6.10"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

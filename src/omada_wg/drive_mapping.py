@@ -181,7 +181,10 @@ class DriveMappingManager:
                 current = self.provider.current(mapping.letter)
                 persistent, username, saved_path = self.provider.saved_details(mapping.letter)
                 previous.append(PreviousMapping(
-                    mapping.letter, mapping.restore_path or current or saved_path,
+                    # A remembered mapping is normally managed by Group Policy.  Prefer it
+                    # to the currently connected drive and never remove its profile merely
+                    # to substitute the VPN address for this session.
+                    mapping.letter, mapping.restore_path or saved_path or current,
                     persistent if (current or saved_path) else bool(mapping.restore_path), username,
                     changed=(mapping.restore_path is not None or current is None or
                              current.casefold() != mapping.path.casefold())))
@@ -209,8 +212,10 @@ class DriveMappingManager:
                 current = self.provider.current(mapping.letter)
                 if current and current.casefold() == mapping.path.casefold():
                     continue
-                if current or saved.persistent:
-                    self.provider.remove(mapping.letter, persistent=saved.persistent)
+                if current:
+                    # Disconnect the active connection only.  Passing CONNECT_UPDATE_PROFILE
+                    # here would delete a remembered / Group Policy drive mapping.
+                    self.provider.remove(mapping.letter, persistent=False)
                 self.provider.add(mapping, persistent=False)
         except Exception:
             self.disconnect()
@@ -226,8 +231,14 @@ class DriveMappingManager:
                 continue
             try:
                 current = self.provider.current(saved.letter)
+                # With no original or explicitly configured LAN path, leave the VPN
+                # connection exactly as it is.  This is intentionally a no-op: the tray
+                # must not delete a Group Policy drive mapping just because it has no
+                # restoration target.
+                if not saved.path:
+                    continue
                 if current:
-                    self.provider.remove(saved.letter, persistent=True)
+                    self.provider.remove(saved.letter, persistent=False)
                 if saved.path:
                     self.provider.add(
                         DriveMapping(saved.letter, saved.path),

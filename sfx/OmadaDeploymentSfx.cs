@@ -46,7 +46,6 @@ internal static class OmadaDeploymentSfx
                 if (child.ExitCode != 0)
                     return child.ExitCode;
             }
-            ScheduleSelfDelete(self);
             return 0;
         }
         catch (Exception error)
@@ -126,14 +125,4 @@ internal static class OmadaDeploymentSfx
         }
     }
 
-    private static void ScheduleSelfDelete(string self)
-    {
-        string escaped = self.Replace("\"", "\"\"");
-        Process.Start(new ProcessStartInfo("cmd.exe",
-            "/d /c \"ping 127.0.0.1 -n 3 >nul & del /f /q \"\"" + escaped + "\"\"\"") {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WindowStyle = ProcessWindowStyle.Hidden
-        });
-    }
 }

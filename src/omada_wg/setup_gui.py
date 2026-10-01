@@ -158,14 +158,14 @@ class SetupWizard:
         ).grid(row=2, column=0, sticky="w")
         ttk.Label(drives, text="VPN / FQDN share").grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
         ttk.Entry(drives, textvariable=self.map_vpn_path).grid(row=2, column=1, sticky="ew", padx=(8, 0))
-        ttk.Label(drives, text="LAN restore share").grid(row=1, column=2, sticky="w", padx=(8, 0), pady=(8, 0))
+        ttk.Label(drives, text="LAN restore share (optional)").grid(row=1, column=2, sticky="w", padx=(8, 0), pady=(8, 0))
         ttk.Entry(drives, textvariable=self.map_lan_path).grid(row=2, column=2, sticky="ew", padx=(8, 0))
         buttons = ttk.Frame(drives)
         buttons.grid(row=2, column=3, columnspan=2, padx=(8, 0))
         ttk.Button(buttons, text="Add / update", command=self._save_drive_mapping).pack(side="left")
         ttk.Button(buttons, text="Remove", command=self._remove_drive_mapping).pack(side="left", padx=(6, 0))
         ttk.Label(
-            drives, text="The VPN path is used while connected; the LAN path is always restored on disconnect.",
+            drives, text="The VPN path is used while connected. LAN restore is optional: a blank field restores the previous mapping when one exists, otherwise does nothing.",
             foreground="#52606d",
         ).grid(row=3, column=1, columnspan=3, sticky="w", pady=(5, 0))
         ttk.Checkbutton(
@@ -221,8 +221,10 @@ class SetupWizard:
         from tkinter import messagebox
         try:
             # Reuse the parser solely as validation for one structured row.
-            mapping = parse_drive_maps(
-                f"{self.map_letter.get()}={self.map_vpn_path.get()} | {self.map_lan_path.get()}")[0]
+            entry = f"{self.map_letter.get()}={self.map_vpn_path.get()}"
+            if self.map_lan_path.get().strip():
+                entry += f" | {self.map_lan_path.get()}"
+            mapping = parse_drive_maps(entry)[0]
         except (EnrollmentError, IndexError) as exc:
             messagebox.showerror("Invalid drive mapping", str(exc), parent=self.root)
             return
@@ -505,8 +507,6 @@ class SetupWizard:
                 raise EnrollmentError("Select a traffic routing option")
             allowed_routes = routes(route_mode, self.vars["routes"].get())
             drive_maps = list(self.drive_mappings)
-            if any(not mapping.restore_path for mapping in drive_maps):
-                raise EnrollmentError("Every drive mapping requires both VPN and LAN restore paths")
             if self.office_disconnect.get() and not any(
                     "." in mapping.path[2:].split("\\", 1)[0] for mapping in drive_maps):
                 raise EnrollmentError(

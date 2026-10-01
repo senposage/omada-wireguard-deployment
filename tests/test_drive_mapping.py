@@ -57,19 +57,19 @@ class DriveMappingTests(unittest.TestCase):
             self.assertEqual(provider.drives["Z:"], r"\\nas.example.com\Shared")
             self.assertTrue(state.is_file())
             self.assertEqual(provider.actions[:2], [
-                ("remove", "Z:", True),
+                ("remove", "Z:", False),
                 ("add", "Z:", r"\\nas.example.com\Shared", False, None),
             ])
 
             manager.disconnect()
             self.assertEqual(provider.drives["Z:"], r"\\NAS\Shared")
             self.assertEqual(provider.actions[-2:], [
-                ("remove", "Z:", True),
+                ("remove", "Z:", False),
                 ("add", "Z:", r"\\NAS\Shared", True, "DOMAIN\\ben"),
             ])
             self.assertFalse(state.exists())
 
-    def test_unused_letter_is_removed_on_disconnect(self):
+    def test_unused_letter_is_left_untouched_on_disconnect(self):
         with tempfile.TemporaryDirectory() as temporary:
             state = Path(temporary) / "maps.json"
             provider = FakeDriveProvider()
@@ -77,7 +77,20 @@ class DriveMappingTests(unittest.TestCase):
                 [DriveMapping("Z:", r"\\nas.example.com\Shared")], state, provider)
             manager.connect()
             manager.disconnect()
-            self.assertNotIn("Z:", provider.drives)
+            self.assertEqual(provider.drives["Z:"], r"\\nas.example.com\Shared")
+
+    def test_blank_restore_path_leaves_new_mapping_untouched(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary) / "maps.json"
+            provider = FakeDriveProvider()
+            manager = DriveMappingManager(
+                [DriveMapping("Z:", r"\\nas.example.com\Shared")], state, provider)
+
+            manager.connect()
+            manager.disconnect()
+
+            self.assertEqual(provider.drives["Z:"], r"\\nas.example.com\Shared")
+            self.assertFalse(state.exists())
 
     def test_explicit_lan_restore_path_is_used_without_a_previous_mapping(self):
         with tempfile.TemporaryDirectory() as temporary:

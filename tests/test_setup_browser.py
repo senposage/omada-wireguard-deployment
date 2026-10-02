@@ -11,8 +11,8 @@ class Request:
 
 class SetupDiscoveryTests(unittest.TestCase):
     def test_generated_executable_name_includes_sanitized_site(self):
-        result = SetupWizard.output_for_site("Omada-WireGuard-Deployment.exe", "Main / Office")
-        self.assertEqual(result.name, "Omada-WireGuard-Deployment-Main_Office.exe")
+        result = SetupWizard.output_for_site("Omada-WireGuard-Deployment-0.2.0.exe", "Main / Office")
+        self.assertEqual(result.name, "Omada-WireGuard-Deployment-0.2.0-Main_Office.exe")
 
     def test_extracts_controller_and_session_metadata(self):
         captured = CapturedSession()

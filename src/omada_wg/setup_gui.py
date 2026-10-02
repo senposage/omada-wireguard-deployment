@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from .credentials import CloudCredentials
 from .cloud_discovery import CloudController, CloudDiscoveryClient
 from .deployment_setup import DeploymentTarget, routes, write_deployment
@@ -52,7 +53,7 @@ class SetupWizard:
             "name_mode": "Computer and user", "custom_name": "",
             "office_disconnect": "0",
             "output": str(((Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
-                            else Path.cwd() / "outputs") / "Omada-WireGuard-Deployment.exe").resolve()),
+                            else Path.cwd() / "outputs") / f"Omada-WireGuard-Deployment-{__version__}.exe").resolve()),
             "status": "Enter the Omada Cloud administrator login, then discover controllers.",
         }.items()}
         self._build()

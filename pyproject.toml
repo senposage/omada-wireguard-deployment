@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "omada-wg-enroll"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Idempotent Omada Client-to-Site WireGuard enrollment"
 requires-python = ">=3.11"
 dependencies = ["cryptography>=43"]
@@ -22,6 +22,9 @@ build = ["pyinstaller>=6.10"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "omada_wg.__version__"}
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

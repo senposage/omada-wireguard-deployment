@@ -2,7 +2,7 @@
 
 Windows deployment tooling for Omada Client-to-Site WireGuard. An administrator uses the graphical Deployment Builder to create a site-specific installer; an end user runs that installer to enroll, install, and control a VPN tunnel without using the WireGuard interface.
 
-Current release: **0.2.0**. This is a Windows-only project. macOS is out of scope and Linux is a later follow-up.
+Current release: **0.2.1**. This is a Windows-only project. macOS is out of scope and Linux is a later follow-up.
 
 ## What it does
 
@@ -32,7 +32,7 @@ Current release: **0.2.0**. This is a Windows-only project. macOS is out of scop
 7. Build the deployment executable, named using the release and site, for example:
 
    ```text
-   Omada-WireGuard-Deployment-0.2.0-Main_Office.exe
+   Omada-WireGuard-Deployment-0.2.1-Main_Office.exe
    ```
 
 The generated EXE contains the installer engine, an encrypted credential vault, and official signed WireGuard MSIs for x64, ARM64, and x86. It remains available after successful installation so it can be run again for Update or Repair.
@@ -85,4 +85,4 @@ It creates one uniquely named throwaway peer and removes it immediately. The com
 
 ## Release versioning
 
-Releases use Semantic Versioning. The version in `src/omada_wg/__init__.py` is the single source of truth for package metadata and generated artifact names. Git tags and generated filenames use the exact number, such as `0.2.0`, without a `v` prefix. See [CHANGELOG.md](CHANGELOG.md).
+Releases use Semantic Versioning. The version in `src/omada_wg/__init__.py` is the single source of truth for package metadata and generated artifact names. Git tags and generated filenames use the exact number, such as `0.2.1`, without a `v` prefix. See [CHANGELOG.md](CHANGELOG.md).

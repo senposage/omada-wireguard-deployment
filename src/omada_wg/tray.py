@@ -16,8 +16,15 @@ from .office_network import OfficeDnsDetector
 def set_tunnel_running(backend: WindowsWireGuardBackend, tunnel_name: str,
                        running: bool, *, timeout: float = 10) -> None:
     if not running:
+        if backend.status(tunnel_name) in {"stopped", "unavailable"}:
+            return
         backend.stop(tunnel_name)
-        return
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if backend.status(tunnel_name) in {"stopped", "unavailable"}:
+                return
+            time.sleep(0.25)
+        raise BackendError("The VPN service did not stop in time")
     if backend.status(tunnel_name) in {"running", "starting"}:
         backend.stop(tunnel_name)
         deadline = time.monotonic() + timeout
@@ -28,6 +35,11 @@ def set_tunnel_running(backend: WindowsWireGuardBackend, tunnel_name: str,
         else:
             raise BackendError("The VPN service did not stop in time to reconnect")
     backend.start(tunnel_name)
+
+
+def stop_tunnel_on_tray_exit(backend: WindowsWireGuardBackend, tunnel_name: str) -> None:
+    """Stop the tunnel before removing the only user-facing controller."""
+    set_tunnel_running(backend, tunnel_name, False)
 
 
 def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
@@ -187,7 +199,7 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
             elif command == self.DISCONNECT:
                 self._set_running(False)
             elif command == self.EXIT:
-                win32gui.DestroyWindow(self.hwnd)
+                self._close(self.hwnd, 0, 0, 0)
 
         def _command(self, hwnd, msg, wparam, lparam):
             self._execute_command(win32api.LOWORD(wparam))
@@ -229,6 +241,17 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
             return 0
 
         def _close(self, hwnd, msg, wparam, lparam):
+            try:
+                stop_tunnel_on_tray_exit(self.backend, tunnel_name)
+            except BackendError as exc:
+                self._log(f"VPN stop during tray shutdown failed: {exc}")
+                win32gui.MessageBox(
+                    self.hwnd,
+                    f"The VPN could not be stopped. The tray will remain open.\n\n{exc}",
+                    display_name,
+                    win32con.MB_OK | win32con.MB_ICONERROR,
+                )
+                return 0
             try:
                 self.drive_manager.disconnect()
             except BackendError as exc:

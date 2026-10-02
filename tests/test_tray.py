@@ -1,6 +1,6 @@
 import unittest
 
-from omada_wg.tray import set_tunnel_running
+from omada_wg.tray import set_tunnel_running, stop_tunnel_on_tray_exit
 
 
 class FakeServiceBackend:
@@ -36,6 +36,12 @@ class TrayControlTests(unittest.TestCase):
     def test_disconnect_stops_a_running_service(self):
         backend = FakeServiceBackend("running")
         set_tunnel_running(backend, "omada", False)
+        self.assertEqual(backend.actions, [("stop", "omada")])
+        self.assertEqual(backend.current, "stopped")
+
+    def test_exit_stops_a_running_service_before_tray_closes(self):
+        backend = FakeServiceBackend("running")
+        stop_tunnel_on_tray_exit(backend, "omada")
         self.assertEqual(backend.actions, [("stop", "omada")])
         self.assertEqual(backend.current, "stopped")
 

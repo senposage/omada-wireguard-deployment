@@ -2,6 +2,10 @@
 
 This project uses [Semantic Versioning](https://semver.org/). Release tags and generated artifacts use the exact release number without a `v` prefix.
 
+## 0.2.1 — 2026-10-02
+
+- Stop the WireGuard tunnel service and confirm that it is stopped before the tray exits.
+
 ## 0.2.0 — 2026-10-01
 
 - Keep generated deployment executables after installation.

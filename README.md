@@ -73,6 +73,29 @@ Run the test suite with:
 py -m unittest discover -s tests -v
 ```
 
+## Build a binary release
+
+The reproducible, cross-platform build entry point is [scripts/build_release.py](scripts/build_release.py). It builds the self-extracting launcher from source, builds the embedded installer engine, runs the test suite, and produces the versioned Deployment Builder EXE.
+
+On a Windows build machine, install Python 3.11+ and the Windows .NET Framework compiler, then run:
+
+```powershell
+git clone https://github.com/senposage/omada-wireguard-deployment.git
+cd omada-wireguard-deployment
+python -m pip install -e ".[setup,build]"
+python scripts\build_release.py --target windows
+```
+
+The output is written to `outputs\Omada-WireGuard-Deployment-Generator-<version>.exe`. To omit the test run only when it has already been completed separately, use:
+
+```powershell
+python scripts\build_release.py --target windows --skip-tests
+```
+
+The build command is portable Python. The Windows EXE target itself must run on Windows because it uses Windows resource, C# compiler, and executable-packaging tooling. Future Linux builds will use the same script with a Linux target.
+
+The release builder contains no Omada customer credentials. Site deployment installers are created later by the GUI and should not be committed or attached to a public release because they include the selected deployment configuration and credential vault.
+
 ## Test-controller write verification
 
 The WireGuard peer write contract is tested against a dedicated throwaway controller. Do not use this against production.

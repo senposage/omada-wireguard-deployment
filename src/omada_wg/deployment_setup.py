@@ -43,6 +43,7 @@ def write_deployment(output: Path, target: DeploymentTarget,
                      start_with_windows: bool = True,
                      drive_maps: list[DriveMapping] | None = None,
                      disconnect_on_office_dns: bool = False,
+                     office_dns_suffix: str | None = None,
                      remove_credentials_after_enroll: bool = False) -> Path:
     site_id = str(site.get("id") or site.get("siteId") or "")
     if not site_id:
@@ -79,6 +80,7 @@ def write_deployment(output: Path, target: DeploymentTarget,
             for mapping in (drive_maps or [])
         ],
         "disconnect_on_office_dns": disconnect_on_office_dns,
+        "office_dns_suffix": office_dns_suffix,
         "remove_credentials_after_enroll": remove_credentials_after_enroll,
         "state_path": r"%ProgramData%\OmadaWireGuard\enrollment.json",
         "credentials_file": credentials_path.name,

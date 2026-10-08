@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from collections.abc import Iterable
 
@@ -15,6 +16,21 @@ def office_dns_suffixes(mappings: Iterable[DriveMapping]) -> frozenset[str]:
         if "." in host:
             suffixes.add(host.split(".", 1)[1])
     return frozenset(suffixes)
+
+
+def normalize_dns_suffix(value: str | None) -> str | None:
+    """Normalize an administrator-supplied DNS suffix for office detection."""
+    if value is None:
+        return None
+    suffix = value.strip().rstrip(".").casefold()
+    if not suffix:
+        return None
+    labels = suffix.split(".")
+    if len(labels) < 2 or any(
+            not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+            for label in labels):
+        raise ValueError("Office DNS suffix must look like example.local")
+    return suffix
 
 
 class WindowsDnsSuffixProvider:
@@ -39,10 +55,14 @@ class WindowsDnsSuffixProvider:
 
 
 class OfficeDnsDetector:
-    def __init__(self, mappings: Iterable[DriveMapping], *, enabled: bool,
-                 provider=None) -> None:
+    def __init__(self, mappings: Iterable[DriveMapping] = (), *, enabled: bool,
+                 suffix: str | None = None, provider=None) -> None:
         self.enabled = enabled
-        self.expected_suffixes = office_dns_suffixes(mappings)
+        # An explicit suffix is independent of drive mappings.  Keep deriving it
+        # from old profiles when the new field was not supplied.
+        specified = normalize_dns_suffix(suffix)
+        self.expected_suffixes = (frozenset({specified}) if specified
+                                  else office_dns_suffixes(mappings))
         self.provider = provider or WindowsDnsSuffixProvider()
 
     def is_on_office_network(self, tunnel_name: str) -> bool:

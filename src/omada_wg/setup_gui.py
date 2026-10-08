@@ -52,6 +52,7 @@ class SetupWizard:
             "keepalive": "", "mtu": "", "tunnel": "omada",
             "name_mode": "Computer and user", "custom_name": "",
             "office_disconnect": "0",
+            "office_dns_suffix": "",
             "output": str(((Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
                             else Path.cwd() / "outputs") / f"Omada-WireGuard-Deployment-{__version__}.exe").resolve()),
             "status": "Enter the Omada Cloud administrator login, then discover controllers.",
@@ -170,13 +171,22 @@ class SetupWizard:
             foreground="#52606d",
         ).grid(row=3, column=1, columnspan=3, sticky="w", pady=(5, 0))
         ttk.Checkbutton(
-            drives, text="Disconnect VPN when the office DNS suffix is present",
-            variable=self.office_disconnect,
-        ).grid(row=4, column=1, columnspan=3, sticky="w", pady=(4, 0))
-        ttk.Checkbutton(
             drives, text="Delete deployment credentials after enrollment (manual Omada peer removal)",
             variable=self.remove_credentials,
-        ).grid(row=5, column=1, columnspan=3, sticky="w", pady=(4, 0))
+        ).grid(row=4, column=1, columnspan=3, sticky="w", pady=(4, 0))
+
+        office = ttk.LabelFrame(outer, text="Office-network detection", padding=14)
+        office.grid(sticky="ew", pady=5)
+        office.columnconfigure(1, weight=1)
+        self._row(office, 0, "Office LAN DNS suffix", "office_dns_suffix")
+        ttk.Label(
+            office, text="Example: office.example.local. This is independent of drive mappings.",
+            foreground="#52606d",
+        ).grid(row=1, column=1, sticky="w", pady=(0, 4))
+        ttk.Checkbutton(
+            office, text="Disconnect VPN when this office DNS suffix is present",
+            variable=self.office_disconnect,
+        ).grid(row=2, column=1, sticky="w", pady=(4, 0))
 
         package = ttk.LabelFrame(outer, text="Deployment output", padding=14)
         package.grid(sticky="ew", pady=5)
@@ -264,7 +274,7 @@ class SetupWizard:
             return
         values = {key: self.vars[key].get() for key in (
             "email", "endpoint", "dns", "route", "routes", "keepalive", "mtu",
-            "tunnel", "name_mode", "custom_name", "output")}
+            "tunnel", "name_mode", "custom_name", "office_dns_suffix", "output")}
         values["drive_maps"] = [
             {"letter": item.letter, "path": item.path, "restore_path": item.restore_path}
             for item in self.drive_mappings
@@ -508,10 +518,12 @@ class SetupWizard:
                 raise EnrollmentError("Select a traffic routing option")
             allowed_routes = routes(route_mode, self.vars["routes"].get())
             drive_maps = list(self.drive_mappings)
-            if self.office_disconnect.get() and not any(
-                    "." in mapping.path[2:].split("\\", 1)[0] for mapping in drive_maps):
-                raise EnrollmentError(
-                    "Office DNS auto-disconnect requires at least one FQDN drive mapping")
+            office_dns_suffix = self.vars["office_dns_suffix"].get().strip() or None
+            if self.office_disconnect.get() and not office_dns_suffix:
+                raise EnrollmentError("Enter the office LAN DNS suffix to enable office auto-disconnect")
+            if office_dns_suffix:
+                from .office_network import normalize_dns_suffix
+                office_dns_suffix = normalize_dns_suffix(office_dns_suffix)
             credentials = CloudCredentials(self.vars["email"].get().strip(), self.vars["password"].get())
             controller = self.controllers[self.controller_box.current()]
             target = DeploymentTarget(controller.device_id, controller.omada_id,
@@ -538,6 +550,7 @@ class SetupWizard:
                 client_custom_name=self.vars["custom_name"].get().strip() or None,
                 drive_maps=drive_maps,
                 disconnect_on_office_dns=self.office_disconnect.get(),
+                office_dns_suffix=office_dns_suffix,
                 remove_credentials_after_enroll=self.remove_credentials.get(),
             )
         except Exception as exc:

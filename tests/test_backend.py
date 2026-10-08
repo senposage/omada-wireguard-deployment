@@ -61,6 +61,30 @@ class WindowsBackendTests(unittest.TestCase):
                 ["sc.exe", "start", "WireGuardTunnel$omada"],
             )
 
+    def test_connection_diagnostic_reports_no_internet(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = RecordingBackend(Path(temporary))
+            backend._run = lambda args, **kwargs: subprocess.CompletedProcess(
+                args, 0, "STATE : 4 RUNNING", "")
+            backend._handshake_completed = lambda tunnel_name: False
+            backend._internet_available = lambda: False
+            diagnostic = backend.diagnose_connection("omada", timeout=0)
+            self.assertIsNotNone(diagnostic)
+            self.assertEqual(diagnostic.code, "no_internet")
+
+    def test_connection_diagnostic_can_be_promoted_when_omada_peer_is_removed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = RecordingBackend(Path(temporary))
+            backend._run = lambda args, **kwargs: subprocess.CompletedProcess(
+                args, 0, "STATE : 4 RUNNING", "")
+            backend._handshake_completed = lambda tunnel_name: False
+            backend._internet_available = lambda: True
+            backend._configured_endpoint = lambda tunnel_name: None
+            diagnostic = backend.diagnose_connection("omada", timeout=0)
+            self.assertIsNotNone(diagnostic)
+            self.assertEqual(diagnostic.code, "endpoint_unreachable")
+            self.assertEqual(diagnostic.peer_removed().code, "peer_removed")
+
     def test_site_display_name_becomes_a_windows_safe_shortcut(self):
         with tempfile.TemporaryDirectory() as temporary:
             backend = WindowsWireGuardBackend(

@@ -45,6 +45,8 @@ def stop_tunnel_on_tray_exit(backend: WindowsWireGuardBackend, tunnel_name: str)
 def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
              drive_maps: tuple[DriveMapping, ...] = (),
              disconnect_on_office_dns: bool = False,
+             office_dns_suffix: str | None = None,
+             peer_registration_check=None,
              instance_name: str = "CompanyVPNTray",
              window_class: str = "OmadaCompanyVpnTrayWindow") -> int:
     if sys.platform != "win32":
@@ -73,7 +75,8 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
             mapping_state = self.log_path.parent / f"drive-maps-{tunnel_name}.json"
             self.drive_manager = DriveMappingManager(drive_maps, mapping_state)
             self.office_detector = OfficeDnsDetector(
-                drive_maps, enabled=disconnect_on_office_dns)
+                drive_maps, enabled=disconnect_on_office_dns, suffix=office_dns_suffix)
+            self.peer_registration_check = peer_registration_check
             self.last_office_check = 0.0
             message_map = {
                 win32con.WM_DESTROY: self._destroy,
@@ -101,6 +104,7 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
                 0, str(asset_root / "omada-vpn-icon-disconnected.ico"), win32con.IMAGE_ICON, 0, 0, flags)
             self.last_status = ""
             self.drive_error: str | None = None
+            self.connection_error: str | None = None
             try:
                 self._sync_drives(self._status())
             except BackendError:
@@ -143,10 +147,15 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
                 "stopping": "Disconnecting",
                 "unavailable": "Unavailable",
             }
-            tip = f"{display_name} — {labels.get(status, status.capitalize())}"[:127]
+            status_label = labels.get(status, status.capitalize())
+            tip = f"{display_name} — {status_label}"[:127]
             if self.drive_error:
                 tip = f"{display_name} — {labels.get(status, status.capitalize())}; drive mapping failed"[:127]
-            icon = self.connected_icon if status == "running" else self.disconnected_icon
+            elif self.connection_error:
+                tip = f"{display_name} — {self.connection_error}"[:127]
+                status_label = "Connection failed"
+            icon = (self.connected_icon if status == "running" and not self.connection_error
+                    else self.disconnected_icon)
             win32gui.Shell_NotifyIcon(operation, (
                 self.hwnd, 0,
                 win32gui.NIF_ICON | win32gui.NIF_MESSAGE | win32gui.NIF_TIP,
@@ -158,10 +167,13 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
             status = self._status()
             menu = win32gui.CreatePopupMenu()
             win32gui.AppendMenu(menu, win32con.MF_STRING | win32con.MF_GRAYED,
-                                0, f"Status: {status.capitalize()}")
+                                0, f"Status: {'Connection failed' if self.connection_error else status.capitalize()}")
             if self.drive_error:
                 win32gui.AppendMenu(menu, win32con.MF_STRING | win32con.MF_GRAYED,
                                     0, "Drive mapping: retrying")
+            if self.connection_error:
+                win32gui.AppendMenu(menu, win32con.MF_STRING | win32con.MF_GRAYED,
+                                    0, self.connection_error[:100])
             win32gui.AppendMenu(menu, win32con.MF_SEPARATOR, 0, "")
             connect_flags = win32con.MF_STRING
             disconnect_flags = win32con.MF_STRING | (win32con.MF_GRAYED if status not in {"running", "starting"} else 0)
@@ -189,6 +201,18 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
             try:
                 set_tunnel_running(self.backend, tunnel_name, running)
                 self._sync_drives(self._status())
+                self.connection_error = None
+                if running:
+                    diagnostic = self.backend.diagnose_connection(tunnel_name)
+                    if diagnostic and diagnostic.code == "endpoint_unreachable" and self.peer_registration_check:
+                        try:
+                            if self.peer_registration_check() is False:
+                                diagnostic = diagnostic.peer_removed()
+                        except Exception as exc:
+                            self._log(f"Omada peer check failed: {exc}")
+                    if diagnostic:
+                        self.connection_error = diagnostic.message
+                        raise BackendError(diagnostic.message)
             except BackendError as exc:
                 win32gui.MessageBox(self.hwnd, str(exc), display_name, win32con.MB_OK | win32con.MB_ICONERROR)
             self._notify(win32gui.NIM_MODIFY)

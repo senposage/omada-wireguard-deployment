@@ -5,12 +5,27 @@ import platform
 import re
 import ipaddress
 import shutil
+import socket
 import subprocess
 import time
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import BackendError
+
+
+@dataclass(frozen=True)
+class ConnectionDiagnostic:
+    """A user-facing explanation for a WireGuard connection that has no handshake."""
+    code: str
+    message: str
+
+    def peer_removed(self) -> "ConnectionDiagnostic":
+        return ConnectionDiagnostic(
+            "peer_removed",
+            "This PC's VPN peer is no longer registered with Omada. Use Repair / re-enroll to create a new peer.",
+        )
 
 
 class WireGuardBackend(ABC):
@@ -109,21 +124,98 @@ class WindowsWireGuardBackend(WireGuardBackend):
         return conf
 
     def _wait_for_connection(self, tunnel_name: str, timeout: float = 20) -> None:
+        diagnostic = self.diagnose_connection(tunnel_name, timeout=timeout)
+        if diagnostic:
+            raise BackendError(diagnostic.message)
+
+    def _handshake_completed(self, tunnel_name: str) -> bool:
         wg = str(Path(self.executable).with_name("wg.exe"))
+        status = self._run([wg, "show", tunnel_name, "latest-handshakes"], ok=(0, 1))
+        return any(
+            len(parts := line.split()) >= 2 and parts[-1].isdigit() and int(parts[-1]) > 0
+            for line in status.stdout.splitlines())
+
+    def _configured_endpoint(self, tunnel_name: str) -> tuple[str, int] | None:
+        """Read the endpoint from the local managed config without exposing its secrets."""
+        try:
+            contents = (self.config_dir / f"{tunnel_name}.conf").read_text(encoding="utf-8")
+        except OSError:
+            return None
+        match = re.search(r"(?mi)^Endpoint\s*=\s*(.+?)\s*$", contents)
+        if not match:
+            return None
+        endpoint = match.group(1).strip()
+        if endpoint.startswith("["):
+            closing = endpoint.find("]")
+            if closing > 1 and endpoint[closing + 1:].startswith(":"):
+                host, port = endpoint[1:closing], endpoint[closing + 2:]
+            else:
+                return None
+        else:
+            host, separator, port = endpoint.rpartition(":")
+            if not separator:
+                return None
+        try:
+            return host, int(port)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _internet_available() -> bool:
+        """Confirm a usable route to the public Internet without changing local state."""
+        try:
+            with socket.create_connection(("1.1.1.1", 443), timeout=3):
+                return True
+        except OSError:
+            return False
+
+    def diagnose_connection(self, tunnel_name: str, *, timeout: float = 15) -> ConnectionDiagnostic | None:
+        """Wait for a handshake, then distinguish offline clients from endpoint failures.
+
+        A WireGuard endpoint intentionally gives no protocol response for an unknown
+        peer.  The caller may pair the endpoint result with a controller-side peer
+        check to identify an explicitly deleted peer.
+        """
         deadline = time.monotonic() + timeout
-        last_detail = ""
-        while time.monotonic() < deadline:
+        service_was_running = False
+        while True:
             service = self._run(["sc.exe", "query", self._service(tunnel_name)], ok=(0, 1060))
             if service.returncode == 0 and "RUNNING" in service.stdout:
-                status = self._run([wg, "show", tunnel_name, "latest-handshakes"], ok=(0, 1))
-                last_detail = (status.stderr or status.stdout).strip()
-                for line in status.stdout.splitlines():
-                    parts = line.split()
-                    if len(parts) >= 2 and parts[-1].isdigit() and int(parts[-1]) > 0:
-                        return
-            time.sleep(1)
-        raise BackendError("WireGuard tunnel started but did not complete a handshake" +
-                           (f": {last_detail}" if last_detail else ""))
+                service_was_running = True
+                if self._handshake_completed(tunnel_name):
+                    return None
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(1, remaining))
+        if not service_was_running:
+            return ConnectionDiagnostic(
+                "service_not_running",
+                "The local WireGuard tunnel service did not stay running. Reconnect or use Repair / re-enroll.",
+            )
+        if not self._internet_available():
+            return ConnectionDiagnostic(
+                "no_internet",
+                "This PC could not reach the public internet. Connect to the internet, then retry the VPN.",
+            )
+        endpoint = self._configured_endpoint(tunnel_name)
+        if endpoint:
+            host, port = endpoint
+            try:
+                socket.getaddrinfo(host, port, type=socket.SOCK_DGRAM)
+            except socket.gaierror:
+                return ConnectionDiagnostic(
+                    "endpoint_unreachable",
+                    f"The configured VPN gateway {host} could not be resolved. Check the public gateway or DDNS name.",
+                )
+            endpoint_label = f"{host}:{port}"
+        else:
+            endpoint_label = "the configured VPN gateway"
+        return ConnectionDiagnostic(
+            "endpoint_unreachable",
+            f"The VPN gateway ({endpoint_label}) did not respond to a WireGuard handshake. "
+            "It may be unreachable or its UDP port may be blocked.",
+        )
 
     def _remove_conflicting_tunnel_services(self, tunnel_name: str, config: str) -> None:
         match = re.search(r"(?mi)^Address\s*=\s*([^,\s/]+)", config)

@@ -1,7 +1,7 @@
 import unittest
 
 from omada_wg.drive_mapping import DriveMapping
-from omada_wg.office_network import OfficeDnsDetector, office_dns_suffixes
+from omada_wg.office_network import OfficeDnsDetector, normalize_dns_suffix, office_dns_suffixes
 
 
 class FakeDnsProvider:
@@ -29,6 +29,22 @@ class OfficeDnsDetectorTests(unittest.TestCase):
             enabled=True, provider=provider)
         self.assertTrue(detector.is_on_office_network("DRKNET"))
         self.assertEqual(provider.seen_tunnel, "DRKNET")
+
+    def test_explicit_suffix_is_independent_of_drive_mappings(self):
+        provider = FakeDnsProvider({"office.example.local"})
+        detector = OfficeDnsDetector(
+            (), enabled=True, suffix="OFFICE.example.local.", provider=provider)
+        self.assertTrue(detector.is_on_office_network("DRKNET"))
+
+    def test_explicit_suffix_does_not_use_a_different_drive_map_domain(self):
+        detector = OfficeDnsDetector(
+            [DriveMapping("Z:", r"\\nas.files.example\Shared")], enabled=True,
+            suffix="office.example.local", provider=FakeDnsProvider({"files.example"}))
+        self.assertFalse(detector.is_on_office_network("DRKNET"))
+
+    def test_rejects_invalid_explicit_suffix(self):
+        with self.assertRaises(ValueError):
+            normalize_dns_suffix("not a domain")
 
     def test_does_not_disconnect_for_unrelated_home_suffix(self):
         detector = OfficeDnsDetector(

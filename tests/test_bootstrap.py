@@ -73,6 +73,18 @@ class RuntimeBootstrapTests(unittest.TestCase):
         self.assertEqual(config.device_id, "")
         self.assertEqual(config.site_id, "")
 
+    def test_package_config_loads_a_separate_office_dns_suffix(self):
+        value = {
+            "controller_name": "Office Controller", "site_name": "Main Office",
+            "server_name": "Staff VPN", "route_mode": "site",
+            "office_dns_suffix": "OFFICE.example.local.",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "deployment.json"
+            path.write_text(json.dumps(value), encoding="utf-8")
+            config = DeploymentConfig.load(path)
+        self.assertEqual(config.office_dns_suffix, "office.example.local")
+
 
 if __name__ == "__main__":
     unittest.main()

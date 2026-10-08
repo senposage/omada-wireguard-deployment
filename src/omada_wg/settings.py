@@ -9,6 +9,7 @@ from typing import Any
 
 from .drive_mapping import DriveMapping, normalize_drive_letter
 from .errors import ConfigurationError
+from .office_network import normalize_dns_suffix
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,7 @@ class DeploymentConfig:
     start_with_windows: bool = True
     drive_maps: tuple[DriveMapping, ...] = ()
     disconnect_on_office_dns: bool = False
+    office_dns_suffix: str | None = None
     remove_credentials_after_enroll: bool = False
 
     @classmethod
@@ -88,6 +90,10 @@ class DeploymentConfig:
         state_path = Path(os.path.expandvars(data.get("state_path", "omada-wg-state.json")))
         if not state_path.is_absolute():
             state_path = source.parent / state_path
+        try:
+            office_dns_suffix = normalize_dns_suffix(data.get("office_dns_suffix"))
+        except ValueError as exc:
+            raise ConfigurationError(str(exc)) from exc
         return cls(
             connector_base_url=str(data.get("connector_base_url") or "").rstrip("/"),
             device_id=str(data.get("device_id") or ""), omada_id=str(data.get("omada_id") or ""),
@@ -114,6 +120,7 @@ class DeploymentConfig:
             start_with_windows=bool(data.get("start_with_windows", True)),
             drive_maps=tuple(drive_maps),
             disconnect_on_office_dns=bool(data.get("disconnect_on_office_dns", False)),
+            office_dns_suffix=office_dns_suffix,
             remove_credentials_after_enroll=bool(data.get("remove_credentials_after_enroll", False)),
             wireguard_msi_dir=(source.parent / data["wireguard_msi_dir"]).resolve()
             if data.get("wireguard_msi_dir") and not Path(data["wireguard_msi_dir"]).is_absolute()

@@ -2,7 +2,7 @@
 
 Windows deployment tooling for Omada Client-to-Site WireGuard. An administrator uses the graphical Deployment Builder to create a site-specific installer; an end user runs that installer to enroll, install, and control a VPN tunnel without using the WireGuard interface.
 
-Current release: **0.2.1**. This is a Windows-only project. macOS is out of scope and Linux is a later follow-up.
+Current release: **0.2.2**. This is a Windows-only project. macOS is out of scope and Linux is a later follow-up.
 
 ## What it does
 
@@ -14,7 +14,7 @@ Current release: **0.2.1**. This is a Windows-only project. macOS is out of scop
 - Supports automatic start at Windows sign-in, desktop shortcut creation, Windows Installed Apps registration, and clean uninstallation.
 - Offers **Update** to reuse an existing peer or **Repair / re-enroll** to delete it and create a fresh one.
 - Supports site routes, full tunnel, and custom host/CIDR routes. An individual host is written as a `/32` route.
-- Supports optional Windows drive maps while connected, plus an optional office-DNS auto-disconnect check.
+- Supports optional Windows drive maps while connected, plus optional office-DNS auto-disconnect using a separately configured LAN suffix.
 
 ## Administrator workflow
 
@@ -29,10 +29,11 @@ Current release: **0.2.1**. This is a Windows-only project. macOS is out of scop
 6. Optionally configure drive mappings. Each row has a drive letter, VPN/FQDN share, and optional LAN restore share.
    - With a LAN restore share, that path replaces the VPN mapping after disconnect.
    - Without one, the tray restores the mapping Windows already had, when present; otherwise it leaves the drive untouched. It does not delete remembered or Group Policy mappings.
+7. Optionally enter the **Office LAN DNS suffix** (for example, `office.example.local`) and enable auto-disconnect. This check is independent of drive mappings, so mapped shares may belong to a different DNS domain.
 7. Build the deployment executable, named using the release and site, for example:
 
    ```text
-   Omada-WireGuard-Deployment-0.2.1-Main_Office.exe
+   Omada-WireGuard-Deployment-0.2.2-Main_Office.exe
    ```
 
 The generated EXE contains the installer engine, an encrypted credential vault, and official signed WireGuard MSIs for x64, ARM64, and x86. It remains available after successful installation so it can be run again for Update or Repair.

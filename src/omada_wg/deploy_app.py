@@ -81,6 +81,20 @@ def _runtime_service(config_path: Path) -> tuple[DeploymentConfig, EnrollmentSer
     return config, EnrollmentService(config, api, backend, StateStore(config.state_path))
 
 
+def _peer_is_registered(config_path: Path) -> bool | None:
+    """Ask Omada whether this installed peer still exists, when credentials remain."""
+    try:
+        _, service = _runtime_service(config_path)
+        saved = service.state.load()
+        if not saved:
+            return None
+        server = service.api.find_server()
+        return any(peer.id == saved.client_id for peer in server.clients)
+    except Exception:
+        # A failed Cloud check must not masquerade as proof that a peer was removed.
+        return None
+
+
 def _unenroll(config_path: Path) -> bool:
     config = DeploymentConfig.load(config_path)
     try:
@@ -197,7 +211,10 @@ def main() -> int:
             display_name = f"Company: {config.site_name} VPN" if config.site_name else "Company VPN"
             return run_tray(
                 config.tunnel_name, display_name, drive_maps=config.drive_maps,
-                disconnect_on_office_dns=config.disconnect_on_office_dns)
+                disconnect_on_office_dns=config.disconnect_on_office_dns,
+                office_dns_suffix=config.office_dns_suffix,
+                peer_registration_check=lambda: _peer_is_registered(
+                    _base_dir() / "deployment.json"))
         except Exception:
             return 2
     uninstall = "--uninstall" in sys.argv[1:]

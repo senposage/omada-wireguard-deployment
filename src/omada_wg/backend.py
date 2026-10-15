@@ -268,7 +268,10 @@ class WindowsWireGuardBackend(WireGuardBackend):
                 for candidate in candidates:
                     try:
                         candidate.unlink()
-                    except FileNotFoundError:
+                    except (FileNotFoundError, OSError):
+                        # A redirected or offline Desktop can report WinError
+                        # 4350 ("file currently unavailable"). Shortcut cleanup
+                        # must never roll back an otherwise healthy VPN install.
                         pass
                 return
             shortcut = shell.CreateShortcut(str(path))
@@ -284,7 +287,12 @@ class WindowsWireGuardBackend(WireGuardBackend):
     def _remove_controller_shortcuts(self) -> None:
         """Remove both current-user and Public Desktop controller shortcuts."""
         for location in ("Desktop", "AllUsersDesktop", "Startup"):
-            self._controller_shortcut(location, False)
+            try:
+                self._controller_shortcut(location, False)
+            except BackendError:
+                # User-profile folders can be offline or redirected. Leave a
+                # stale shortcut rather than failing an enrollment or uninstall.
+                continue
 
     def _controller_autostart(self, enabled: bool, *, all_users: bool = False) -> None:
         """Register the tray at logon for one user or every user on this PC."""
@@ -376,7 +384,12 @@ class WindowsWireGuardBackend(WireGuardBackend):
         self._grant_interactive_service_controls(tunnel_name)
         self._remove_controller_shortcuts()
         if desktop_shortcut:
-            self._controller_shortcut("AllUsersDesktop" if all_users else "Desktop", True)
+            try:
+                self._controller_shortcut("AllUsersDesktop" if all_users else "Desktop", True)
+            except BackendError:
+                # The VPN itself and tray startup remain usable when a redirected
+                # Desktop is temporarily unavailable.
+                pass
         # A shared install always has its tray ready at every user's sign-in. The
         # tunnel service itself still follows the separate automatic-start choice.
         self._controller_autostart(start_with_windows or all_users, all_users=all_users)

@@ -136,6 +136,21 @@ class WindowsBackendTests(unittest.TestCase):
             self.assertIn(("autostart", True, True), events)
             self.assertIn(("trigger", "omada", True), events)
 
+    def test_unavailable_old_desktop_shortcut_does_not_abort_cleanup(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = RecordingBackend(Path(temporary))
+            seen = []
+
+            def remove(location, enabled):
+                seen.append(location)
+                if location == "Desktop":
+                    from omada_wg.errors import BackendError
+                    raise BackendError("Desktop is unavailable")
+
+            backend._controller_shortcut = remove
+            backend._remove_controller_shortcuts()
+            self.assertEqual(seen, ["Desktop", "AllUsersDesktop", "Startup"])
+
     def test_install_removes_only_a_tunnel_using_the_same_client_ip(self):
         with tempfile.TemporaryDirectory() as temporary:
             backend = RecordingBackend(Path(temporary))

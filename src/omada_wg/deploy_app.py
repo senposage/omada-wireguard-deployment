@@ -267,8 +267,14 @@ def main() -> int:
     progress.pack(pady=16)
     progress.start(12)
     boot_enabled = tk.BooleanVar(value=True)
+    all_users_enabled = tk.BooleanVar(value=False)
     boot_option = ttk.Checkbutton(
         frame, text="Start Company VPN automatically with Windows", variable=boot_enabled)
+    all_users_option = ttk.Checkbutton(
+        frame,
+        text="Make VPN controls available to all users (start tray at every sign-in)",
+        variable=all_users_enabled,
+    )
     finish_button = ttk.Button(frame, text="Finish")
     update_button = ttk.Button(frame, text="Update this VPN")
     repair_button = ttk.Button(frame, text="Repair / re-enroll")
@@ -326,6 +332,7 @@ def main() -> int:
         else:
             status.set(f"Connected as {client_name}")
             boot_option.pack(pady=(10, 5))
+            all_users_option.pack(pady=(2, 5))
             finish_button.configure(command=finish_install)
             finish_button.pack(pady=(8, 0))
 
@@ -376,6 +383,7 @@ def main() -> int:
                 desktop_shortcut=True,
                 launch_manager=True,
                 start_with_windows=boot_enabled.get(),
+                all_users=all_users_enabled.get(),
             )
         except Exception as exc:
             messagebox.showerror("Cannot save startup preference", str(exc), parent=root)

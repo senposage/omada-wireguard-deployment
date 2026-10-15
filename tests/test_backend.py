@@ -116,6 +116,26 @@ class WindowsBackendTests(unittest.TestCase):
             self.assertEqual(command[:3], ["sc.exe", "sdset", "WireGuardTunnel$omada"])
             self.assertIn("(A;;RPWP;;;IU)", command[3])
 
+    def test_all_users_access_uses_public_desktop_and_machine_logon(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = RecordingBackend(Path(temporary))
+            events = []
+            backend._grant_interactive_service_controls = lambda tunnel: events.append(("grant", tunnel))
+            backend._remove_controller_shortcuts = lambda: events.append(("clear_shortcuts",))
+            backend._controller_shortcut = lambda location, enabled: events.append(("shortcut", location, enabled))
+            backend._controller_autostart = lambda enabled, *, all_users=False: events.append(
+                ("autostart", enabled, all_users))
+            backend._controller_service_trigger = lambda tunnel, enabled: events.append(
+                ("trigger", tunnel, enabled))
+
+            backend.configure_access(
+                "omada", desktop_shortcut=True, launch_manager=False,
+                start_with_windows=False, all_users=True)
+
+            self.assertIn(("shortcut", "AllUsersDesktop", True), events)
+            self.assertIn(("autostart", True, True), events)
+            self.assertIn(("trigger", "omada", True), events)
+
     def test_install_removes_only_a_tunnel_using_the_same_client_ip(self):
         with tempfile.TemporaryDirectory() as temporary:
             backend = RecordingBackend(Path(temporary))

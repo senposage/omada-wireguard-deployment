@@ -46,7 +46,8 @@ class WireGuardBackend(ABC):
 
     @abstractmethod
     def configure_access(self, tunnel_name: str, *, desktop_shortcut: bool,
-                         launch_manager: bool, start_with_windows: bool) -> None: ...
+                         launch_manager: bool, start_with_windows: bool,
+                         all_users: bool = False) -> None: ...
 
 
 class WindowsWireGuardBackend(WireGuardBackend):
@@ -241,10 +242,10 @@ class WindowsWireGuardBackend(WireGuardBackend):
                 self._run([self.executable, "/uninstalltunnelservice", alias])
 
     def launch_controller(self) -> None:
-        shortcut = self._shortcut_path("Desktop")
         try:
             subprocess.Popen(
-                ["explorer.exe", str(shortcut)], close_fds=True,
+                [str(self.controller_executable), "--tray"],
+                cwd=str(self.controller_executable.parent), close_fds=True,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except OSError as exc:
             raise BackendError(f"Cannot launch the Company VPN tray controller: {exc}") from exc
@@ -280,26 +281,46 @@ class WindowsWireGuardBackend(WireGuardBackend):
         except Exception as exc:
             raise BackendError(f"Cannot update the {location} WireGuard shortcut: {exc}") from exc
 
-    def _controller_autostart(self, enabled: bool) -> None:
-        """Register the tray at logon without relying on a fragile Startup shortcut."""
+    def _remove_controller_shortcuts(self) -> None:
+        """Remove both current-user and Public Desktop controller shortcuts."""
+        for location in ("Desktop", "AllUsersDesktop", "Startup"):
+            self._controller_shortcut(location, False)
+
+    def _controller_autostart(self, enabled: bool, *, all_users: bool = False) -> None:
+        """Register the tray at logon for one user or every user on this PC."""
         try:
             import winreg
             key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
             value_name = "OmadaWireGuardTray"
+
+            def remove_value(root) -> None:
+                try:
+                    with winreg.CreateKeyEx(root, key_path, 0, winreg.KEY_SET_VALUE) as key:
+                        try:
+                            winreg.DeleteValue(key, value_name)
+                        except FileNotFoundError:
+                            pass
+                except FileNotFoundError:
+                    pass
+
+            roots = (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE)
+            if not enabled:
+                for root in roots:
+                    remove_value(root)
+                return
+
+            target_root = winreg.HKEY_LOCAL_MACHINE if all_users else winreg.HKEY_CURRENT_USER
+            other_root = winreg.HKEY_CURRENT_USER if all_users else winreg.HKEY_LOCAL_MACHINE
             with winreg.CreateKeyEx(
-                    winreg.HKEY_LOCAL_MACHINE, key_path, 0,
+                    target_root, key_path, 0,
                     winreg.KEY_QUERY_VALUE | winreg.KEY_SET_VALUE) as key:
-                if enabled:
-                    command = f'"{self.controller_executable}" --tray'
-                    winreg.SetValueEx(key, value_name, 0, winreg.REG_SZ, command)
-                    saved, _ = winreg.QueryValueEx(key, value_name)
-                    if saved != command:
-                        raise BackendError("Windows did not retain the tray startup registration")
-                else:
-                    try:
-                        winreg.DeleteValue(key, value_name)
-                    except FileNotFoundError:
-                        pass
+                command = f'"{self.controller_executable}" --tray'
+                winreg.SetValueEx(key, value_name, 0, winreg.REG_SZ, command)
+                saved, _ = winreg.QueryValueEx(key, value_name)
+                if saved != command:
+                    raise BackendError("Windows did not retain the tray startup registration")
+            # An installation can be switched between one-user and all-user mode.
+            remove_value(other_root)
         except BackendError:
             raise
         except Exception as exc:
@@ -346,16 +367,19 @@ class WindowsWireGuardBackend(WireGuardBackend):
             raise BackendError("Windows did not retain the tray start/stop service permissions")
 
     def configure_access(self, tunnel_name: str, *, desktop_shortcut: bool,
-                         launch_manager: bool, start_with_windows: bool) -> None:
+                         launch_manager: bool, start_with_windows: bool,
+                         all_users: bool = False) -> None:
         self._run([
             "sc.exe", "config", self._service(tunnel_name), "start=",
             "auto" if start_with_windows else "demand",
         ])
         self._grant_interactive_service_controls(tunnel_name)
-        self._controller_shortcut("Desktop", desktop_shortcut)
-        # Remove shortcuts produced by older builds and use the machine Run key.
-        self._controller_shortcut("Startup", False)
-        self._controller_autostart(start_with_windows)
+        self._remove_controller_shortcuts()
+        if desktop_shortcut:
+            self._controller_shortcut("AllUsersDesktop" if all_users else "Desktop", True)
+        # A shared install always has its tray ready at every user's sign-in. The
+        # tunnel service itself still follows the separate automatic-start choice.
+        self._controller_autostart(start_with_windows or all_users, all_users=all_users)
         self._controller_service_trigger(tunnel_name, True)
         if launch_manager:
             self.launch_controller()
@@ -401,7 +425,6 @@ class WindowsWireGuardBackend(WireGuardBackend):
             (self.config_dir / f"{tunnel_name}.conf").unlink()
         except FileNotFoundError:
             pass
-        self._controller_shortcut("Desktop", False)
-        self._controller_shortcut("Startup", False)
+        self._remove_controller_shortcuts()
         self._controller_autostart(False)
         self._controller_service_trigger(tunnel_name, False)

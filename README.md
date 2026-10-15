@@ -2,7 +2,7 @@
 
 Windows deployment tooling for Omada Client-to-Site WireGuard. An administrator uses the graphical Deployment Builder to create a site-specific installer; an end user runs that installer to enroll, install, and control a VPN tunnel without using the WireGuard interface.
 
-Current release: **0.2.2**. This is a Windows-only project. macOS is out of scope and Linux is a later follow-up.
+Current release: **0.2.3**. This is a Windows-only project. macOS is out of scope and Linux is a later follow-up.
 
 ## What it does
 
@@ -33,7 +33,7 @@ Current release: **0.2.2**. This is a Windows-only project. macOS is out of scop
 7. Build the deployment executable, named using the release and site, for example:
 
    ```text
-   Omada-WireGuard-Deployment-0.2.2-Main_Office.exe
+   Omada-WireGuard-Deployment-0.2.3-Main_Office.exe
    ```
 
 The generated EXE contains the installer engine, an encrypted credential vault, and official signed WireGuard MSIs for x64, ARM64, and x86. It remains available after successful installation so it can be run again for Update or Repair.
@@ -42,7 +42,7 @@ The generated EXE contains the installer engine, an encrypted credential vault, 
 
 1. Run the generated site installer and approve Windows elevation.
 2. If this computer already has an Omada peer, choose **Update** or **Repair / re-enroll**.
-3. Choose whether the tunnel and tray controller should start automatically with Windows.
+3. Choose whether the tunnel starts automatically with Windows. Optionally select **Make VPN controls available to all users of this PC** to add a Public Desktop shortcut and start the tray for every user at sign-in; the WireGuard tunnel remains one shared machine service.
 4. Use the installed tray icon to connect, reconnect, or disconnect. The tray is named after the site and is installed under:
 
    ```text

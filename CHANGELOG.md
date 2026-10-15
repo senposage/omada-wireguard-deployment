@@ -2,6 +2,10 @@
 
 This project uses [Semantic Versioning](https://semver.org/). Release tags and generated artifacts use the exact release number without a `v` prefix.
 
+## 0.2.3 — 2026-10-15
+
+- Add an installer-time all-users option: a Public Desktop shortcut and a tray launch for every user at sign-in, backed by the shared WireGuard tunnel service.
+
 ## 0.2.2 — 2026-10-08
 
 - Add a dedicated Office LAN DNS suffix setting, independent of drive mapping domains.

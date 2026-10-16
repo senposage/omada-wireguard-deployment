@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import os
 import sys
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -107,7 +108,7 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
             # tunnel can be started after the tray is already running.
             self.last_drive_status: str | None = None
             self.pending_drive_status: str | None = None
-            self.pending_drive_sync_at = 0.0
+            self.drive_sync_generation = 0
             self.drive_error: str | None = None
             self.connection_error: str | None = None
             try:
@@ -154,17 +155,34 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
 
         def _request_drive_sync(self, status: str) -> None:
             """Synchronize once per state transition without racing Windows reconnect."""
+            self.drive_sync_generation += 1
+            generation = self.drive_sync_generation
             if status == "running":
                 # A persistent Windows mapping may reconnect just after the
                 # WireGuard interface becomes available.  Give that native
                 # operation a moment, then inspect the current mapping before
                 # deciding whether this tray needs to change anything.
                 self.pending_drive_status = status
-                self.pending_drive_sync_at = time.monotonic() + 5.0
+                worker = threading.Timer(5.0, self._run_scheduled_drive_sync,
+                                         args=(generation,))
+                worker.daemon = True
+                worker.start()
                 return
             self.pending_drive_status = None
-            self.pending_drive_sync_at = 0.0
             self._sync_drives(status)
+
+        def _run_scheduled_drive_sync(self, generation: int) -> None:
+            """Perform the single post-connect sync outside the UI timer."""
+            if generation != self.drive_sync_generation:
+                return
+            try:
+                if self._status() == "running":
+                    self._sync_drives("running")
+            except BackendError:
+                pass
+            finally:
+                if generation == self.drive_sync_generation:
+                    self.pending_drive_status = None
 
         def _notify(self, operation: int) -> None:
             status = self._status()
@@ -288,14 +306,6 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
                     self._request_drive_sync(status)
                 except BackendError:
                     pass
-            if (self.pending_drive_status == status and
-                    now >= self.pending_drive_sync_at):
-                self.pending_drive_status = None
-                self.pending_drive_sync_at = 0.0
-                try:
-                    self._sync_drives(status)
-                except BackendError:
-                    pass
             if status != self.last_status:
                 self._notify(win32gui.NIM_MODIFY)
             return 0
@@ -307,6 +317,9 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
             return 0
 
         def _close(self, hwnd, msg, wparam, lparam):
+            # Cancel an outstanding delayed post-connect sync before the
+            # service is stopped and the tray window is destroyed.
+            self.drive_sync_generation += 1
             try:
                 stop_tunnel_on_tray_exit(self.backend, tunnel_name)
             except BackendError as exc:

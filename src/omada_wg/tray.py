@@ -127,6 +127,9 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
                 return "unavailable"
 
         def _sync_drives(self, status: str) -> None:
+            if not self.drive_manager.mappings:
+                self.drive_error = None
+                return
             try:
                 if status == "running":
                     self.drive_manager.connect()

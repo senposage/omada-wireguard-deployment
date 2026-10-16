@@ -222,6 +222,12 @@ class DriveMappingManager:
             raise
 
     def disconnect(self) -> None:
+        # A deployment without configured drive mappings must never inspect a
+        # leftover state file or call Windows networking APIs on disconnect.
+        # This keeps the tray disconnect action a true no-op for machines that
+        # do not use mapped drives.
+        if not self.mappings:
+            return
         previous = self._load()
         if previous is None:
             return

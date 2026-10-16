@@ -79,6 +79,17 @@ class DriveMappingTests(unittest.TestCase):
             manager.disconnect()
             self.assertEqual(provider.drives["Z:"], r"\\nas.example.com\Shared")
 
+    def test_no_configured_mappings_do_not_read_stale_state_on_disconnect(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary) / "maps.json"
+            state.write_text("not valid json", encoding="utf-8")
+            provider = FakeDriveProvider()
+            manager = DriveMappingManager([], state, provider)
+
+            manager.disconnect()
+
+            self.assertEqual(provider.actions, [])
+
     def test_blank_restore_path_leaves_new_mapping_untouched(self):
         with tempfile.TemporaryDirectory() as temporary:
             state = Path(temporary) / "maps.json"

@@ -2,6 +2,10 @@
 
 This project uses [Semantic Versioning](https://semver.org/). Release tags and generated artifacts use the exact release number without a `v` prefix.
 
+## 0.2.6 — 2026-10-16
+
+- Make tray drive handling a no-op on disconnect when a deployment has no configured drive mappings.
+
 ## 0.2.5 — 2026-10-15
 
 - Make the Deployment Builder DPI-aware and vertically scrollable, with responsive text wrapping and a more polished section/action layout.

@@ -2,6 +2,11 @@
 
 This project uses [Semantic Versioning](https://semver.org/). Release tags and generated artifacts use the exact release number without a `v` prefix.
 
+## 0.2.7 — 2026-10-16
+
+- Ensure configured VPN drive mappings are created after the tunnel transitions to connected, including when the tray starts first.
+- Keep drive operations transition-driven: allow Windows five seconds to complete its own reconnect work, then inspect and change a mapping at most once per state transition.
+
 ## 0.2.6 — 2026-10-16
 
 - Make tray drive handling a no-op on disconnect when a deployment has no configured drive mappings.

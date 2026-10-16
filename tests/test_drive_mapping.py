@@ -103,6 +103,22 @@ class DriveMappingTests(unittest.TestCase):
             self.assertEqual(provider.drives["Z:"], r"\\nas.example.com\Shared")
             self.assertFalse(state.exists())
 
+    def test_reconnect_recreates_a_vpn_mapping_removed_mid_session(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary) / "maps.json"
+            provider = FakeDriveProvider()
+            manager = DriveMappingManager(
+                [DriveMapping("Z:", r"\\nas.example.com\Shared")], state, provider)
+
+            manager.connect()
+            provider.drives.pop("Z:")  # Simulate a manual removal while connected.
+
+            manager.connect()
+
+            self.assertEqual(provider.drives["Z:"], r"\\nas.example.com\Shared")
+            self.assertEqual(provider.actions[-1],
+                             ("add", "Z:", r"\\nas.example.com\Shared", False, None))
+
     def test_explicit_lan_restore_path_is_used_without_a_previous_mapping(self):
         with tempfile.TemporaryDirectory() as temporary:
             state = Path(temporary) / "maps.json"

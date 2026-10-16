@@ -103,10 +103,15 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
             self.disconnected_icon = win32gui.LoadImage(
                 0, str(asset_root / "omada-vpn-icon-disconnected.ico"), win32con.IMAGE_ICON, 0, 0, flags)
             self.last_status = ""
+            # Keep drive handling independent from icon/status updates.  A
+            # tunnel can be started after the tray is already running.
+            self.last_drive_status: str | None = None
+            self.pending_drive_status: str | None = None
+            self.pending_drive_sync_at = 0.0
             self.drive_error: str | None = None
             self.connection_error: str | None = None
             try:
-                self._sync_drives(self._status())
+                self._request_drive_sync(self._status())
             except BackendError:
                 pass
             self._notify(win32gui.NIM_ADD)
@@ -129,6 +134,7 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
         def _sync_drives(self, status: str) -> None:
             if not self.drive_manager.mappings:
                 self.drive_error = None
+                self.last_drive_status = status
                 return
             try:
                 if status == "running":
@@ -140,6 +146,25 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
                 self.drive_error = str(exc)
                 self._log(f"drive mapping failed: {exc}")
                 raise
+            finally:
+                # A failed restore while off-site must not be retried every
+                # timer tick.  A subsequent connection always performs a
+                # fresh connect sync and can recreate a missing VPN mapping.
+                self.last_drive_status = status
+
+        def _request_drive_sync(self, status: str) -> None:
+            """Synchronize once per state transition without racing Windows reconnect."""
+            if status == "running":
+                # A persistent Windows mapping may reconnect just after the
+                # WireGuard interface becomes available.  Give that native
+                # operation a moment, then inspect the current mapping before
+                # deciding whether this tray needs to change anything.
+                self.pending_drive_status = status
+                self.pending_drive_sync_at = time.monotonic() + 5.0
+                return
+            self.pending_drive_status = None
+            self.pending_drive_sync_at = 0.0
+            self._sync_drives(status)
 
         def _notify(self, operation: int) -> None:
             status = self._status()
@@ -203,7 +228,7 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
         def _set_running(self, running: bool) -> None:
             try:
                 set_tunnel_running(self.backend, tunnel_name, running)
-                self._sync_drives(self._status())
+                self._request_drive_sync(self._status())
                 self.connection_error = None
                 if running:
                     diagnostic = self.backend.diagnose_connection(tunnel_name)
@@ -253,11 +278,25 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
                         self.backend.stop(tunnel_name)
                 except Exception:
                     self._log("office DNS detection failed:\n" + traceback.format_exc())
-            if status != self.last_status or self.drive_error:
+            # Drive operations are deliberately transition-driven.  Windows
+            # is sensitive to repeated connection operations, and can start
+            # reconnecting remembered mappings itself after a new interface
+            # appears.  Never contend with that mechanism in a polling loop.
+            if (status != self.last_drive_status and
+                    self.pending_drive_status != status):
+                try:
+                    self._request_drive_sync(status)
+                except BackendError:
+                    pass
+            if (self.pending_drive_status == status and
+                    now >= self.pending_drive_sync_at):
+                self.pending_drive_status = None
+                self.pending_drive_sync_at = 0.0
                 try:
                     self._sync_drives(status)
                 except BackendError:
                     pass
+            if status != self.last_status:
                 self._notify(win32gui.NIM_MODIFY)
             return 0
 

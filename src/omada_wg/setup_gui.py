@@ -6,6 +6,7 @@ import threading
 import sys
 import shutil
 import tempfile
+import ctypes
 from pathlib import Path
 from typing import Any
 
@@ -24,10 +25,21 @@ class SetupWizard:
         from tkinter import ttk
 
         self.tk, self.ttk = tk, ttk
+        if sys.platform == "win32":
+            try:
+                # Let Tk use the monitor's real DPI instead of Windows bitmap
+                # scaling a cramped fixed-size form.
+                ctypes.windll.shcore.SetProcessDpiAwareness(2)
+            except (AttributeError, OSError):
+                pass
         self.root = tk.Tk()
         self.root.title("Company VPN Deployment Builder")
-        self.root.geometry("860x930")
-        self.root.minsize(760, 820)
+        self.root.geometry("980x780")
+        self.root.minsize(720, 600)
+        try:
+            self.root.tk.call("tk", "scaling", self.root.winfo_fpixels("1i") / 72.0)
+        except tk.TclError:
+            pass
         icon_roots = [Path(getattr(sys, "_MEIPASS", "")), Path(__file__).resolve().parents[2]]
         for root in icon_roots:
             icon = root / "assets" / "omada-vpn-icon.png"
@@ -40,6 +52,8 @@ class SetupWizard:
             style.theme_use("vista")
         style.configure("AppTitle.TLabel", font=("Segoe UI", 20, "bold"))
         style.configure("AppSubtitle.TLabel", font=("Segoe UI", 10), foreground="#52606d")
+        style.configure("TLabelframe.Label", font=("Segoe UI", 10, "bold"))
+        style.configure("Primary.TButton", font=("Segoe UI", 10, "bold"))
         self.discovery: CloudDiscoveryClient | None = None
         self.controllers: list[CloudController] = []
         self.sites: list[dict[str, Any]] = []
@@ -65,10 +79,47 @@ class SetupWizard:
         entry.grid(row=row, column=1, sticky="ew", pady=6)
         return entry
 
+    def _sync_scroll_region(self, _event=None) -> None:
+        self.form_canvas.configure(scrollregion=self.form_canvas.bbox("all"))
+
+    def _fit_form_width(self, event) -> None:
+        self.form_canvas.itemconfigure(self.form_window, width=event.width)
+        wrap = max(360, event.width - 300)
+        if hasattr(self, "route_description"):
+            self.route_description.configure(wraplength=wrap)
+        if hasattr(self, "status_label"):
+            self.status_label.configure(wraplength=max(420, event.width - 48))
+
+    def _scroll_form(self, event) -> str:
+        delta = getattr(event, "delta", 0)
+        if delta:
+            self.form_canvas.yview_scroll(-max(1, abs(delta) // 120) * (1 if delta > 0 else -1), "units")
+        elif getattr(event, "num", 0) == 4:
+            self.form_canvas.yview_scroll(-3, "units")
+        elif getattr(event, "num", 0) == 5:
+            self.form_canvas.yview_scroll(3, "units")
+        return "break"
+
     def _build(self) -> None:
         tk, ttk = self.tk, self.ttk
-        outer = ttk.Frame(self.root, padding=22)
-        outer.pack(fill="both", expand=True)
+        viewport = ttk.Frame(self.root)
+        viewport.pack(fill="both", expand=True)
+        viewport.rowconfigure(0, weight=1)
+        viewport.columnconfigure(0, weight=1)
+        canvas_background = ttk.Style(self.root).lookup("TFrame", "background") or "#f0f0f0"
+        self.form_canvas = tk.Canvas(
+            viewport, highlightthickness=0, borderwidth=0, background=canvas_background)
+        scrollbar = ttk.Scrollbar(viewport, orient="vertical", command=self.form_canvas.yview)
+        self.form_canvas.configure(yscrollcommand=scrollbar.set)
+        self.form_canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        outer = ttk.Frame(self.form_canvas, padding=(28, 22, 28, 30))
+        self.form_window = self.form_canvas.create_window((0, 0), window=outer, anchor="nw")
+        outer.bind("<Configure>", self._sync_scroll_region)
+        self.form_canvas.bind("<Configure>", self._fit_form_width)
+        self.root.bind_all("<MouseWheel>", self._scroll_form, add="+")
+        self.root.bind_all("<Button-4>", self._scroll_form, add="+")
+        self.root.bind_all("<Button-5>", self._scroll_form, add="+")
         outer.columnconfigure(0, weight=1)
         ttk.Label(outer, text="Create a managed VPN installer", style="AppTitle.TLabel").grid(sticky="w")
         ttk.Label(
@@ -107,7 +158,7 @@ class SetupWizard:
                                  values=("Site networks", "Custom IPs / networks", "Full tunnel"))
         route_box.grid(row=2, column=1, sticky="ew", pady=6)
         route_box.bind("<<ComboboxSelected>>", lambda _: self._route_changed())
-        self.route_description = ttk.Label(network, foreground="#52606d", wraplength=520)
+        self.route_description = ttk.Label(network, foreground="#52606d", wraplength=620)
         self.route_description.grid(row=3, column=1, sticky="w", pady=(0, 4))
         self.routes_label = ttk.Label(network, text="Custom IPs / networks")
         self.routes_label.grid(row=4, column=0, sticky="w", padx=(0, 12), pady=6)
@@ -193,7 +244,9 @@ class SetupWizard:
         package.columnconfigure(1, weight=1)
         self._row(package, 0, "Deployment executable", "output")
         ttk.Button(package, text="Browse…", command=self.browse).grid(row=0, column=2, padx=(8, 0))
-        self.build_button = ttk.Button(package, text="Build deployment EXE", command=self.generate, state="disabled")
+        self.build_button = ttk.Button(
+            package, text="Build deployment EXE", command=self.generate,
+            state="disabled", style="Primary.TButton")
         self.build_button.grid(row=1, column=1, sticky="e", pady=(8, 2))
         profile_buttons = ttk.Frame(package)
         profile_buttons.grid(row=2, column=1, sticky="e", pady=(8, 0))
@@ -201,7 +254,11 @@ class SetupWizard:
         ttk.Button(profile_buttons, text="Save configuration…", command=self.save_profile).pack(side="left", padx=(8, 0))
         self.progress = ttk.Progressbar(outer, mode="indeterminate")
         self.progress.grid(sticky="ew", pady=(14, 5))
-        ttk.Label(outer, textvariable=self.vars["status"], wraplength=700).grid(sticky="w")
+        self.status_label = ttk.Label(
+            outer, textvariable=self.vars["status"], wraplength=760,
+            foreground="#52606d")
+        self.status_label.grid(sticky="w")
+        self._sync_scroll_region()
 
     def browse(self) -> None:
         from tkinter import filedialog

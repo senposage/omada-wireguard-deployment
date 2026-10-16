@@ -2,6 +2,10 @@
 
 This project uses [Semantic Versioning](https://semver.org/). Release tags and generated artifacts use the exact release number without a `v` prefix.
 
+## 0.2.5 — 2026-10-15
+
+- Make the Deployment Builder DPI-aware and vertically scrollable, with responsive text wrapping and a more polished section/action layout.
+
 ## 0.2.4 — 2026-10-15
 
 - Treat absent, redirected, or temporarily unavailable tray shortcut paths as non-fatal during installation, update, repair, and uninstall.

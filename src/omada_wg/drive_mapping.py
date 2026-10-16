@@ -231,24 +231,25 @@ class DriveMappingManager:
         previous = self._load()
         if previous is None:
             return
+        configured = {mapping.letter: mapping for mapping in self.mappings}
         errors: list[str] = []
         for saved in reversed(previous):
             if not saved.changed:
                 continue
             try:
                 current = self.provider.current(saved.letter)
-                # With no original or explicitly configured LAN path, leave the VPN
-                # connection exactly as it is.  This is intentionally a no-op: the tray
-                # must not delete a Group Policy drive mapping just because it has no
-                # restoration target.
-                if not saved.path:
+                target = configured.get(saved.letter)
+                # Restore only a drive currently owned by this VPN.  If the
+                # user removed it, Windows restored it itself, or another
+                # process remapped the letter, it is no longer ours to change.
+                # In particular, never recreate a missing short-name map.
+                if (not saved.path or not target or not current or
+                        current.casefold() != target.path.casefold()):
                     continue
-                if current:
-                    self.provider.remove(saved.letter, persistent=False)
-                if saved.path:
-                    self.provider.add(
-                        DriveMapping(saved.letter, saved.path),
-                        persistent=saved.persistent, username=saved.username)
+                self.provider.remove(saved.letter, persistent=False)
+                self.provider.add(
+                    DriveMapping(saved.letter, saved.path),
+                    persistent=saved.persistent, username=saved.username)
             except Exception as exc:
                 errors.append(str(exc))
         if not errors:

@@ -2,6 +2,10 @@
 
 This project uses [Semantic Versioning](https://semver.org/). Release tags and generated artifacts use the exact release number without a `v` prefix.
 
+## 0.2.8 — 2026-10-16
+
+- Restore a LAN mapping only when the drive letter is still actively mapped to this deployment's VPN path; a missing or manually changed mapping is a no-op.
+
 ## 0.2.7 — 2026-10-16
 
 - Ensure configured VPN drive mappings are created after the tunnel transitions to connected, including when the tray starts first.

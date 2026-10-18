@@ -284,6 +284,13 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
             """Synchronize once per state transition without racing Windows reconnect."""
             self.drive_sync_generation += 1
             generation = self.drive_sync_generation
+            # No configured mappings means there is nothing to delay, inspect,
+            # or report as pending.  In particular, don't show the logon/GP
+            # drive wait status for deployments that do not use drive maps.
+            if not self.drive_manager.mappings:
+                self.pending_drive_status = None
+                self._sync_drives(status)
+                return
             if status == "running":
                 # A persistent Windows mapping may reconnect just after the
                 # WireGuard interface becomes available.  Give that native

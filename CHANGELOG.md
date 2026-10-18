@@ -2,6 +2,10 @@
 
 This project uses [Semantic Versioning](https://semver.org/). Release tags and generated artifacts use the exact release number without a `v` prefix.
 
+## 0.3.5 — 2026-10-18
+
+- Skip all drive-map delay and status messaging when the deployment has no configured drive mappings.
+
 ## 0.3.4 — 2026-10-18
 
 - Show **Connected — waiting for network drives** in the tray tooltip and menu while the post-connect Windows logon and Group Policy settle window is active.

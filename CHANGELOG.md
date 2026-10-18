@@ -2,6 +2,10 @@
 
 This project uses [Semantic Versioning](https://semver.org/). Release tags and generated artifacts use the exact release number without a `v` prefix.
 
+## 0.3.4 — 2026-10-18
+
+- Show **Connected — waiting for network drives** in the tray tooltip and menu while the post-connect Windows logon and Group Policy settle window is active.
+
 ## 0.3.3 — 2026-10-18
 
 - Keep the tray immediately available at sign-in but defer drive-map changes for the Windows logon settle window, then detect a freshly updated per-user drive-map profile and wait for Group Policy's mapping work to settle before changing a configured letter.

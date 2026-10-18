@@ -88,6 +88,7 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
         CONNECT_ON_SIGN_IN = 1004
         WM_SERVICE_STATUS = win32con.WM_USER + 21
         WM_SHOW_CONNECT_PROMPT = wm_show_connect_prompt
+        WM_DRIVE_SYNC_FINISHED = win32con.WM_USER + 22
 
         def __init__(self) -> None:
             self.backend = WindowsWireGuardBackend()
@@ -111,6 +112,7 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
                 self.WM_TRAY: self._tray_event,
                 self.WM_SERVICE_STATUS: self._service_status_changed,
                 self.WM_SHOW_CONNECT_PROMPT: self._show_connect_prompt,
+                self.WM_DRIVE_SYNC_FINISHED: self._drive_sync_finished,
             }
             window_definition = win32gui.WNDCLASS()
             window_definition.hInstance = self.hinst
@@ -229,6 +231,10 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
             self._refresh_service_state()
             return 0
 
+        def _drive_sync_finished(self, hwnd, msg, wparam, lparam):
+            self._notify(win32gui.NIM_MODIFY)
+            return 0
+
         def _show_connect_prompt(self, hwnd, msg, wparam, lparam):
             status = self._status()
             if status in {"running", "starting"}:
@@ -306,6 +312,11 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
             finally:
                 if generation == self.drive_sync_generation:
                     self.pending_drive_status = None
+                    try:
+                        win32gui.PostMessage(
+                            self.hwnd, self.WM_DRIVE_SYNC_FINISHED, 0, 0)
+                    except win32gui.error:
+                        pass
 
         def _notify(self, operation: int) -> None:
             status = self._status()
@@ -318,7 +329,9 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
             }
             status_label = labels.get(status, status.capitalize())
             tip = f"{display_name} — {status_label}"[:127]
-            if self.drive_error:
+            if status == "running" and self.pending_drive_status == "running":
+                tip = f"{display_name} — Connected; waiting for network drives"[:127]
+            elif self.drive_error:
                 tip = f"{display_name} — {labels.get(status, status.capitalize())}; drive mapping failed"[:127]
             elif self.connection_error:
                 tip = f"{display_name} — {status_label}; {self.connection_error}"[:127]
@@ -342,6 +355,9 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
             if self.drive_error:
                 win32gui.AppendMenu(menu, win32con.MF_STRING | win32con.MF_GRAYED,
                                     0, "Drive mapping: retrying")
+            elif status == "running" and self.pending_drive_status == "running":
+                win32gui.AppendMenu(menu, win32con.MF_STRING | win32con.MF_GRAYED,
+                                    0, "Network drives: waiting for Windows sign-in and policy")
             if self.connection_error:
                 win32gui.AppendMenu(menu, win32con.MF_STRING | win32con.MF_GRAYED,
                                     0, self.connection_error[:100])

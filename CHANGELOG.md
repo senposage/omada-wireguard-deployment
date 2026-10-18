@@ -2,6 +2,10 @@
 
 This project uses [Semantic Versioning](https://semver.org/). Release tags and generated artifacts use the exact release number without a `v` prefix.
 
+## 0.3.2 — 2026-10-18
+
+- Before replacing or restoring a mapped drive, wait for Windows to report that its prior connection is actually gone; the drive letter is not reused merely because a fixed delay elapsed.
+
 ## 0.3.1 — 2026-10-18
 
 - Make the desktop shortcut a visible fallback for a hidden Windows tray icon: when the tray is already running, clicking the shortcut opens a clear Connect prompt instead of silently doing nothing.

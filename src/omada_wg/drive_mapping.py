@@ -4,6 +4,7 @@ import ctypes
 import json
 import os
 import re
+import time
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
@@ -147,10 +148,23 @@ class WindowsDriveProvider:
 
 class DriveMappingManager:
     def __init__(self, mappings: tuple[DriveMapping, ...] | list[DriveMapping],
-                 state_path: Path, provider=None) -> None:
+                 state_path: Path, provider=None, *,
+                 release_timeout: float = 5.0,
+                 release_poll_interval: float = 0.1) -> None:
         self.mappings = tuple(mappings)
         self.state_path = state_path
         self.provider = provider or WindowsDriveProvider()
+        self.release_timeout = release_timeout
+        self.release_poll_interval = release_poll_interval
+
+    def _wait_until_unmapped(self, letter: str) -> None:
+        """Do not reuse a letter until Windows confirms its connection is gone."""
+        deadline = time.monotonic() + self.release_timeout
+        while self.provider.current(letter) is not None:
+            if time.monotonic() >= deadline:
+                raise BackendError(
+                    f"Windows is still releasing drive {letter}; it was not remapped")
+            time.sleep(self.release_poll_interval)
 
     def _load(self) -> list[PreviousMapping] | None:
         try:
@@ -216,6 +230,7 @@ class DriveMappingManager:
                     # Disconnect the active connection only.  Passing CONNECT_UPDATE_PROFILE
                     # here would delete a remembered / Group Policy drive mapping.
                     self.provider.remove(mapping.letter, persistent=False)
+                    self._wait_until_unmapped(mapping.letter)
                 self.provider.add(mapping, persistent=False)
         except Exception:
             self.disconnect()
@@ -247,6 +262,7 @@ class DriveMappingManager:
                         current.casefold() != target.path.casefold()):
                     continue
                 self.provider.remove(saved.letter, persistent=False)
+                self._wait_until_unmapped(saved.letter)
                 self.provider.add(
                     DriveMapping(saved.letter, saved.path),
                     persistent=saved.persistent, username=saved.username)

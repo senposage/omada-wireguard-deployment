@@ -31,6 +31,25 @@ class FakeDriveProvider:
             self.saved[mapping.letter] = (True, username)
 
 
+class DelayedReleaseDriveProvider(FakeDriveProvider):
+    """Simulates Windows briefly retaining a letter after an unmap request."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.pending_release: dict[str, int] = {}
+
+    def remove(self, letter, *, persistent):
+        super().remove(letter, persistent=persistent)
+        self.pending_release[letter] = 2
+
+    def current(self, letter):
+        pending = self.pending_release.get(letter, 0)
+        if pending:
+            self.pending_release[letter] = pending - 1
+            return r"\\Windows-is-still-releasing\Share"
+        return super().current(letter)
+
+
 class DriveMappingTests(unittest.TestCase):
     def test_parser_accepts_multiple_fqdn_unc_maps(self):
         maps = parse_drive_maps(
@@ -68,6 +87,18 @@ class DriveMappingTests(unittest.TestCase):
                 ("add", "Z:", r"\\NAS\Shared", True, "DOMAIN\\ben"),
             ])
             self.assertFalse(state.exists())
+
+    def test_connect_waits_for_windows_to_release_letter_before_remapping(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            provider = DelayedReleaseDriveProvider({"Z:": r"\\NAS\Shared"})
+            manager = DriveMappingManager(
+                [DriveMapping("Z:", r"\\nas.example.com\Shared")],
+                Path(temporary) / "maps.json", provider, release_poll_interval=0)
+
+            manager.connect()
+
+            self.assertEqual(provider.pending_release["Z:"], 0)
+            self.assertEqual(provider.drives["Z:"], r"\\nas.example.com\Shared")
 
     def test_unused_letter_is_left_untouched_on_disconnect(self):
         with tempfile.TemporaryDirectory() as temporary:

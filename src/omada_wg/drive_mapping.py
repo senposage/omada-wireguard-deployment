@@ -126,6 +126,24 @@ class WindowsDriveProvider:
         except FileNotFoundError:
             return False, None, None
 
+    @staticmethod
+    def profile_age_seconds(letter: str) -> float | None:
+        """Return the age of the user's persisted mapping profile, if any.
+
+        Group Policy Drive Maps updates this per-user profile as it creates or
+        changes a drive.  It is readable by a standard user, unlike the Group
+        Policy Operational log, so the tray can safely use it at logon.
+        """
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"Network\{letter[0]}") as key:
+                _, _, last_write = winreg.QueryInfoKey(key)
+        except FileNotFoundError:
+            return None
+        # Registry timestamps are 100 ns ticks since 1601-01-01 UTC.
+        unix_seconds = (last_write - 116444736000000000) / 10_000_000
+        return max(0.0, time.time() - unix_seconds)
+
     def remove(self, letter: str, *, persistent: bool) -> None:
         flags = CONNECT_UPDATE_PROFILE if persistent else 0
         result = self.mpr.WNetCancelConnection2W(letter, flags, True)
@@ -150,12 +168,34 @@ class DriveMappingManager:
     def __init__(self, mappings: tuple[DriveMapping, ...] | list[DriveMapping],
                  state_path: Path, provider=None, *,
                  release_timeout: float = 5.0,
-                 release_poll_interval: float = 0.1) -> None:
+                 release_poll_interval: float = 0.1,
+                 policy_quiet_seconds: float = 10.0,
+                 policy_wait_timeout: float = 30.0,
+                 policy_poll_interval: float = 0.25) -> None:
         self.mappings = tuple(mappings)
         self.state_path = state_path
         self.provider = provider or WindowsDriveProvider()
         self.release_timeout = release_timeout
         self.release_poll_interval = release_poll_interval
+        self.policy_quiet_seconds = policy_quiet_seconds
+        self.policy_wait_timeout = policy_wait_timeout
+        self.policy_poll_interval = policy_poll_interval
+
+    def _wait_for_recent_policy_update(self, letter: str) -> None:
+        """Allow a just-updated Group Policy drive-map profile to settle first."""
+        profile_age = getattr(self.provider, "profile_age_seconds", None)
+        if not callable(profile_age):
+            return
+        deadline = time.monotonic() + self.policy_wait_timeout
+        while True:
+            age = profile_age(letter)
+            if age is None or age >= self.policy_quiet_seconds:
+                return
+            if time.monotonic() >= deadline:
+                raise BackendError(
+                    f"Windows is still applying a recent drive-map policy for {letter}; "
+                    "it was not remapped")
+            time.sleep(self.policy_poll_interval)
 
     def _wait_until_unmapped(self, letter: str) -> None:
         """Do not reuse a letter until Windows confirms its connection is gone."""
@@ -188,6 +228,11 @@ class DriveMappingManager:
     def connect(self) -> None:
         if not self.mappings:
             return
+        # A Group Policy Drive Maps update commonly runs at sign-in.  Let its
+        # persisted user profile become quiet before capturing or replacing a
+        # mapping, otherwise the two writers can race for the same letter.
+        for mapping in self.mappings:
+            self._wait_for_recent_policy_update(mapping.letter)
         previous = self._load()
         if previous is None:
             previous = []

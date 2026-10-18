@@ -1,6 +1,6 @@
 import unittest
 
-from omada_wg.tray import set_tunnel_running, stop_tunnel_on_tray_exit
+from omada_wg.tray import mapping_settle_delay, set_tunnel_running, stop_tunnel_on_tray_exit
 
 
 class FakeServiceBackend:
@@ -21,6 +21,11 @@ class FakeServiceBackend:
 
 
 class TrayControlTests(unittest.TestCase):
+    def test_mapping_waits_for_the_initial_sign_in_settle_window(self):
+        self.assertEqual(mapping_settle_delay(0), 30)
+        self.assertEqual(mapping_settle_delay(17), 13)
+        self.assertEqual(mapping_settle_delay(45), 5)
+
     def test_connect_starts_a_stopped_service(self):
         backend = FakeServiceBackend("stopped")
         set_tunnel_running(backend, "omada", True)

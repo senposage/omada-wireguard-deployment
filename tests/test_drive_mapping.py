@@ -50,6 +50,17 @@ class DelayedReleaseDriveProvider(FakeDriveProvider):
         return super().current(letter)
 
 
+class RecentPolicyDriveProvider(FakeDriveProvider):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.policy_ages = [0.0, 0.0, None]
+        self.policy_checks = 0
+
+    def profile_age_seconds(self, letter):
+        self.policy_checks += 1
+        return self.policy_ages.pop(0) if self.policy_ages else None
+
+
 class DriveMappingTests(unittest.TestCase):
     def test_parser_accepts_multiple_fqdn_unc_maps(self):
         maps = parse_drive_maps(
@@ -98,6 +109,18 @@ class DriveMappingTests(unittest.TestCase):
             manager.connect()
 
             self.assertEqual(provider.pending_release["Z:"], 0)
+            self.assertEqual(provider.drives["Z:"], r"\\nas.example.com\Shared")
+
+    def test_connect_waits_for_a_recent_group_policy_drive_update_to_settle(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            provider = RecentPolicyDriveProvider({"Z:": r"\\NAS\Shared"})
+            manager = DriveMappingManager(
+                [DriveMapping("Z:", r"\\nas.example.com\Shared")],
+                Path(temporary) / "maps.json", provider, policy_poll_interval=0)
+
+            manager.connect()
+
+            self.assertEqual(provider.policy_checks, 3)
             self.assertEqual(provider.drives["Z:"], r"\\nas.example.com\Shared")
 
     def test_unused_letter_is_left_untouched_on_disconnect(self):

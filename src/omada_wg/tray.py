@@ -15,6 +15,12 @@ from .drive_mapping import DriveMapping, DriveMappingManager
 from .office_network import OfficeDnsDetector
 
 
+def mapping_settle_delay(session_age: float, *, normal_delay: float = 5.0,
+                         sign_in_settle: float = 30.0) -> float:
+    """Give Windows logon and Group Policy processing time before drive changes."""
+    return max(normal_delay, sign_in_settle - max(0.0, session_age))
+
+
 def set_tunnel_running(backend: WindowsWireGuardBackend, tunnel_name: str,
                        running: bool, *, timeout: float = 10) -> None:
     if not running:
@@ -96,6 +102,7 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
                 drive_maps, enabled=disconnect_on_office_dns, suffix=office_dns_suffix)
             self.peer_registration_check = peer_registration_check
             self.last_office_check = 0.0
+            self.session_started = time.monotonic()
             message_map = {
                 win32con.WM_DESTROY: self._destroy,
                 win32con.WM_CLOSE: self._close,
@@ -274,10 +281,12 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
             if status == "running":
                 # A persistent Windows mapping may reconnect just after the
                 # WireGuard interface becomes available.  Give that native
-                # operation a moment, then inspect the current mapping before
-                # deciding whether this tray needs to change anything.
+                # operation a moment.  During sign-in, allow the wider
+                # Windows logon and Group Policy processing window to finish
+                # before inspecting or changing a drive letter.
                 self.pending_drive_status = status
-                worker = threading.Timer(5.0, self._run_scheduled_drive_sync,
+                delay = mapping_settle_delay(time.monotonic() - self.session_started)
+                worker = threading.Timer(delay, self._run_scheduled_drive_sync,
                                          args=(generation,))
                 worker.daemon = True
                 worker.start()

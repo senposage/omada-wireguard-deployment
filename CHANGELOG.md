@@ -2,6 +2,10 @@
 
 This project uses [Semantic Versioning](https://semver.org/). Release tags and generated artifacts use the exact release number without a `v` prefix.
 
+## 0.3.3 — 2026-10-18
+
+- Keep the tray immediately available at sign-in but defer drive-map changes for the Windows logon settle window, then detect a freshly updated per-user drive-map profile and wait for Group Policy's mapping work to settle before changing a configured letter.
+
 ## 0.3.2 — 2026-10-18
 
 - Before replacing or restoring a mapped drive, wait for Windows to report that its prior connection is actually gone; the drive letter is not reused merely because a fixed delay elapsed.

@@ -2,6 +2,11 @@
 
 This project uses [Semantic Versioning](https://semver.org/). Release tags and generated artifacts use the exact release number without a `v` prefix.
 
+## 0.3.1 — 2026-10-18
+
+- Make the desktop shortcut a visible fallback for a hidden Windows tray icon: when the tray is already running, clicking the shortcut opens a clear Connect prompt instead of silently doing nothing.
+- Confirm an already-connected or disconnecting VPN without restarting its service.
+
 ## 0.3.0 — 2026-10-18
 
 - Add a per-user tray option, **Connect VPN when I sign in**, which starts the tray and its existing WireGuard service at that user's next sign-in.

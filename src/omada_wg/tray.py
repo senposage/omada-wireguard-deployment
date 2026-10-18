@@ -49,6 +49,7 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
              disconnect_on_office_dns: bool = False,
              office_dns_suffix: str | None = None,
              peer_registration_check=None,
+             show_connect_prompt: bool = False,
              instance_name: str = "CompanyVPNTray",
              window_class: str = "OmadaCompanyVpnTrayWindow") -> int:
     if sys.platform != "win32":
@@ -59,8 +60,18 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
     import win32gui
     import winerror
 
+    # The desktop shortcut uses this message to ask the already-running tray
+    # to show its connect prompt.  A second tray process is never created.
+    wm_show_connect_prompt = win32con.WM_APP + 137
     mutex = win32event.CreateMutex(None, False, "Local\\" + instance_name)
     if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+        if show_connect_prompt:
+            existing = win32gui.FindWindow(window_class, None)
+            if existing:
+                try:
+                    win32gui.PostMessage(existing, wm_show_connect_prompt, 0, 0)
+                except win32gui.error:
+                    pass
         return 0
 
     class CompanyVpnTray:
@@ -70,6 +81,7 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
         EXIT = 1003
         CONNECT_ON_SIGN_IN = 1004
         WM_SERVICE_STATUS = win32con.WM_USER + 21
+        WM_SHOW_CONNECT_PROMPT = wm_show_connect_prompt
 
         def __init__(self) -> None:
             self.backend = WindowsWireGuardBackend()
@@ -91,6 +103,7 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
                 win32con.WM_TIMER: self._timer,
                 self.WM_TRAY: self._tray_event,
                 self.WM_SERVICE_STATUS: self._service_status_changed,
+                self.WM_SHOW_CONNECT_PROMPT: self._show_connect_prompt,
             }
             window_definition = win32gui.WNDCLASS()
             window_definition.hInstance = self.hinst
@@ -207,6 +220,24 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
 
         def _service_status_changed(self, hwnd, msg, wparam, lparam):
             self._refresh_service_state()
+            return 0
+
+        def _show_connect_prompt(self, hwnd, msg, wparam, lparam):
+            status = self._status()
+            if status in {"running", "starting"}:
+                win32gui.MessageBox(
+                    self.hwnd, "The VPN is already connected.", display_name,
+                    win32con.MB_OK | win32con.MB_ICONINFORMATION)
+                return 0
+            if status == "stopping":
+                win32gui.MessageBox(
+                    self.hwnd, "The VPN is disconnecting. Please wait a moment.", display_name,
+                    win32con.MB_OK | win32con.MB_ICONINFORMATION)
+                return 0
+            if win32gui.MessageBox(
+                    self.hwnd, "The VPN is disconnected. Connect now?", display_name,
+                    win32con.MB_YESNO | win32con.MB_ICONQUESTION) == win32con.IDYES:
+                self._set_running(True)
             return 0
 
         def _status(self) -> str:

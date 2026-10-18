@@ -214,7 +214,8 @@ def main() -> int:
                 disconnect_on_office_dns=config.disconnect_on_office_dns,
                 office_dns_suffix=config.office_dns_suffix,
                 peer_registration_check=lambda: _peer_is_registered(
-                    _base_dir() / "deployment.json"))
+                    _base_dir() / "deployment.json"),
+                show_connect_prompt="--show-connect-prompt" in sys.argv[1:])
         except Exception:
             return 2
     uninstall = "--uninstall" in sys.argv[1:]

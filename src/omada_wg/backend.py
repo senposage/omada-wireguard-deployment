@@ -276,7 +276,7 @@ class WindowsWireGuardBackend(WireGuardBackend):
                 return
             shortcut = shell.CreateShortcut(str(path))
             shortcut.TargetPath = str(self.controller_executable)
-            shortcut.Arguments = "--tray"
+            shortcut.Arguments = "--tray --show-connect-prompt"
             shortcut.WorkingDirectory = str(self.controller_executable.parent)
             shortcut.Description = f"Open {self.display_name} connection controls"
             shortcut.IconLocation = f"{self.controller_executable},0"

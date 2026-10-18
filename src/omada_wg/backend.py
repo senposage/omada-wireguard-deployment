@@ -301,11 +301,11 @@ class WindowsWireGuardBackend(WireGuardBackend):
             key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
             value_name = "OmadaWireGuardTray"
 
-            def remove_value(root) -> None:
+            def remove_value(root, name: str = value_name) -> None:
                 try:
                     with winreg.CreateKeyEx(root, key_path, 0, winreg.KEY_SET_VALUE) as key:
                         try:
-                            winreg.DeleteValue(key, value_name)
+                            winreg.DeleteValue(key, name)
                         except FileNotFoundError:
                             pass
                 except FileNotFoundError:
@@ -315,6 +315,7 @@ class WindowsWireGuardBackend(WireGuardBackend):
             if not enabled:
                 for root in roots:
                     remove_value(root)
+                    remove_value(root, "OmadaWireGuardTrayUserConnect")
                 return
 
             target_root = winreg.HKEY_LOCAL_MACHINE if all_users else winreg.HKEY_CURRENT_USER

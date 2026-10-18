@@ -2,6 +2,11 @@
 
 This project uses [Semantic Versioning](https://semver.org/). Release tags and generated artifacts use the exact release number without a `v` prefix.
 
+## 0.3.0 — 2026-10-18
+
+- Add a per-user tray option, **Connect VPN when I sign in**, which starts the tray and its existing WireGuard service at that user's next sign-in.
+- Drive the tray color and status text from the live Windows service state; blue is shown only while the service is `RUNNING`.
+
 ## 0.2.9 — 2026-10-16
 
 - Run the single delayed post-connect mapping synchronization independently of the tray window timer, so the configured drives are applied reliably after Windows completes its own reconnect work.

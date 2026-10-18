@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 import sys
 import threading
@@ -67,12 +68,16 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
         CONNECT = 1001
         DISCONNECT = 1002
         EXIT = 1003
+        CONNECT_ON_SIGN_IN = 1004
+        WM_SERVICE_STATUS = win32con.WM_USER + 21
 
         def __init__(self) -> None:
             self.backend = WindowsWireGuardBackend()
             self.hinst = win32api.GetModuleHandle(None)
             self.class_name = window_class
             self.log_path = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "OmadaWireGuard" / "tray.log"
+            self.preference_path = self.log_path.parent / f"tray-{tunnel_name}.json"
+            self.connect_on_sign_in = self._load_connect_on_sign_in()
             mapping_state = self.log_path.parent / f"drive-maps-{tunnel_name}.json"
             self.drive_manager = DriveMappingManager(drive_maps, mapping_state)
             self.office_detector = OfficeDnsDetector(
@@ -85,6 +90,7 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
                 win32con.WM_COMMAND: self._command,
                 win32con.WM_TIMER: self._timer,
                 self.WM_TRAY: self._tray_event,
+                self.WM_SERVICE_STATUS: self._service_status_changed,
             }
             window_definition = win32gui.WNDCLASS()
             window_definition.hInstance = self.hinst
@@ -111,12 +117,16 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
             self.drive_sync_generation = 0
             self.drive_error: str | None = None
             self.connection_error: str | None = None
+            self.status_monitor_stop = threading.Event()
             try:
                 self._request_drive_sync(self._status())
             except BackendError:
                 pass
             self._notify(win32gui.NIM_ADD)
             ctypes.windll.user32.SetTimer(self.hwnd, 1, 3000, None)
+            self._start_status_monitor()
+            if self.connect_on_sign_in:
+                self._start_on_sign_in()
 
         def _log(self, message: str) -> None:
             try:
@@ -125,6 +135,79 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
                     output.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n")
             except OSError:
                 pass
+
+        def _load_connect_on_sign_in(self) -> bool:
+            try:
+                data = json.loads(self.preference_path.read_text(encoding="utf-8"))
+                return bool(data.get("connect_on_sign_in", False))
+            except (FileNotFoundError, OSError, json.JSONDecodeError, AttributeError):
+                return False
+
+        def _save_connect_on_sign_in(self) -> None:
+            self.preference_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.preference_path.with_suffix(".tmp")
+            temporary.write_text(
+                json.dumps({"connect_on_sign_in": self.connect_on_sign_in}) + "\n",
+                encoding="utf-8")
+            os.replace(temporary, self.preference_path)
+
+        def _set_user_sign_in_launcher(self, enabled: bool) -> None:
+            """Keep the tray available at this user's sign-in for this preference."""
+            try:
+                import winreg
+                key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+                value_name = "OmadaWireGuardTrayUserConnect"
+                with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, key_path, 0,
+                                         winreg.KEY_SET_VALUE) as key:
+                    if enabled:
+                        command = f'"{Path(sys.executable).resolve()}" --tray'
+                        winreg.SetValueEx(key, value_name, 0, winreg.REG_SZ, command)
+                    else:
+                        try:
+                            winreg.DeleteValue(key, value_name)
+                        except FileNotFoundError:
+                            pass
+            except Exception as exc:
+                raise BackendError(f"Cannot update the Connect VPN on sign-in setting: {exc}") from exc
+
+        def _start_status_monitor(self) -> None:
+            def monitor() -> None:
+                previous: str | None = None
+                while not self.status_monitor_stop.wait(1.5):
+                    status = self._status()
+                    if status == previous:
+                        continue
+                    previous = status
+                    try:
+                        win32gui.PostMessage(self.hwnd, self.WM_SERVICE_STATUS, 0, 0)
+                    except win32gui.error:
+                        return
+
+            threading.Thread(target=monitor, name="OmadaWireGuardStatus", daemon=True).start()
+
+        def _start_on_sign_in(self) -> None:
+            try:
+                status = self._status()
+                if status == "stopped":
+                    self.backend.start(tunnel_name)
+                self._request_drive_sync(self._status())
+            except BackendError as exc:
+                self._log(f"Connect VPN on sign-in failed: {exc}")
+
+        def _refresh_service_state(self) -> None:
+            status = self._status()
+            if (status != self.last_drive_status and
+                    self.pending_drive_status != status):
+                try:
+                    self._request_drive_sync(status)
+                except BackendError:
+                    pass
+            if status != self.last_status:
+                self._notify(win32gui.NIM_MODIFY)
+
+        def _service_status_changed(self, hwnd, msg, wparam, lparam):
+            self._refresh_service_state()
+            return 0
 
         def _status(self) -> str:
             try:
@@ -198,9 +281,11 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
             if self.drive_error:
                 tip = f"{display_name} — {labels.get(status, status.capitalize())}; drive mapping failed"[:127]
             elif self.connection_error:
-                tip = f"{display_name} — {self.connection_error}"[:127]
-                status_label = "Connection failed"
-            icon = (self.connected_icon if status == "running" and not self.connection_error
+                tip = f"{display_name} — {status_label}; {self.connection_error}"[:127]
+            # The color represents only the live Windows service state.  A
+            # connectivity diagnostic may add detail, but cannot make a
+            # stopped service appear connected or a running service gray.
+            icon = (self.connected_icon if status == "running"
                     else self.disconnected_icon)
             win32gui.Shell_NotifyIcon(operation, (
                 self.hwnd, 0,
@@ -213,7 +298,7 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
             status = self._status()
             menu = win32gui.CreatePopupMenu()
             win32gui.AppendMenu(menu, win32con.MF_STRING | win32con.MF_GRAYED,
-                                0, f"Status: {'Connection failed' if self.connection_error else status.capitalize()}")
+                                0, f"Status: {status.capitalize()}")
             if self.drive_error:
                 win32gui.AppendMenu(menu, win32con.MF_STRING | win32con.MF_GRAYED,
                                     0, "Drive mapping: retrying")
@@ -225,6 +310,11 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
             disconnect_flags = win32con.MF_STRING | (win32con.MF_GRAYED if status not in {"running", "starting"} else 0)
             win32gui.AppendMenu(menu, connect_flags, self.CONNECT, "Connect / Reconnect")
             win32gui.AppendMenu(menu, disconnect_flags, self.DISCONNECT, "Disconnect")
+            sign_in_flags = win32con.MF_STRING
+            if self.connect_on_sign_in:
+                sign_in_flags |= win32con.MF_CHECKED
+            win32gui.AppendMenu(menu, sign_in_flags, self.CONNECT_ON_SIGN_IN,
+                                "Connect VPN when I sign in")
             win32gui.AppendMenu(menu, win32con.MF_SEPARATOR, 0, "")
             win32gui.AppendMenu(menu, win32con.MF_STRING, self.EXIT, "Exit tray")
             try:
@@ -268,6 +358,15 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
                 self._set_running(True)
             elif command == self.DISCONNECT:
                 self._set_running(False)
+            elif command == self.CONNECT_ON_SIGN_IN:
+                enabled = not self.connect_on_sign_in
+                try:
+                    self._set_user_sign_in_launcher(enabled)
+                    self.connect_on_sign_in = enabled
+                    self._save_connect_on_sign_in()
+                except BackendError as exc:
+                    win32gui.MessageBox(self.hwnd, str(exc), display_name,
+                                        win32con.MB_OK | win32con.MB_ICONERROR)
             elif command == self.EXIT:
                 self._close(self.hwnd, 0, 0, 0)
 
@@ -278,7 +377,6 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
         def _tray_event(self, hwnd, msg, wparam, lparam):
             try:
                 event = win32api.LOWORD(lparam)
-                self._log(f"notification event={event}")
                 if event in (win32con.WM_RBUTTONUP, win32con.WM_CONTEXTMENU):
                     self._show_menu()
             except Exception:
@@ -296,21 +394,11 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
                         self.backend.stop(tunnel_name)
                 except Exception:
                     self._log("office DNS detection failed:\n" + traceback.format_exc())
-            # Drive operations are deliberately transition-driven.  Windows
-            # is sensitive to repeated connection operations, and can start
-            # reconnecting remembered mappings itself after a new interface
-            # appears.  Never contend with that mechanism in a polling loop.
-            if (status != self.last_drive_status and
-                    self.pending_drive_status != status):
-                try:
-                    self._request_drive_sync(status)
-                except BackendError:
-                    pass
-            if status != self.last_status:
-                self._notify(win32gui.NIM_MODIFY)
+            self._refresh_service_state()
             return 0
 
         def _destroy(self, hwnd, msg, wparam, lparam):
+            self.status_monitor_stop.set()
             ctypes.windll.user32.KillTimer(self.hwnd, 1)
             win32gui.Shell_NotifyIcon(win32gui.NIM_DELETE, (self.hwnd, 0))
             win32gui.PostQuitMessage(0)
@@ -320,6 +408,7 @@ def run_tray(tunnel_name: str, display_name: str = "Company VPN", *,
             # Cancel an outstanding delayed post-connect sync before the
             # service is stopped and the tray window is destroyed.
             self.drive_sync_generation += 1
+            self.status_monitor_stop.set()
             try:
                 stop_tunnel_on_tray_exit(self.backend, tunnel_name)
             except BackendError as exc:

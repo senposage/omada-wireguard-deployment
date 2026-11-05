@@ -2,6 +2,10 @@
 
 This project uses [Semantic Versioning](https://semver.org/). Release tags and generated artifacts use the exact release number without a `v` prefix.
 
+## 0.3.6 — 2026-11-05
+
+- Do not report a UDP handshake failure when Windows allows the tray user to manage the WireGuard service but denies `wg.exe` access to inspect its service-owned interface.
+
 ## 0.3.5 — 2026-10-18
 
 - Skip all drive-map delay and status messaging when the deployment has no configured drive mappings.

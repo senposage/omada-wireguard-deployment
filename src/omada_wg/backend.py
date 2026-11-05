@@ -129,9 +129,15 @@ class WindowsWireGuardBackend(WireGuardBackend):
         if diagnostic:
             raise BackendError(diagnostic.message)
 
-    def _handshake_completed(self, tunnel_name: str) -> bool:
+    def _handshake_completed(self, tunnel_name: str) -> bool | None:
+        """Return True/False when readable, or None when Windows denies inspection."""
         wg = str(Path(self.executable).with_name("wg.exe"))
         status = self._run([wg, "show", tunnel_name, "latest-handshakes"], ok=(0, 1))
+        if status.returncode != 0:
+            # A standard interactive user can be allowed to control the tunnel
+            # service while the service-owned interface remains unreadable to
+            # wg.exe.  That is not evidence of a UDP or peer failure.
+            return None
         return any(
             len(parts := line.split()) >= 2 and parts[-1].isdigit() and int(parts[-1]) > 0
             for line in status.stdout.splitlines())
@@ -183,7 +189,12 @@ class WindowsWireGuardBackend(WireGuardBackend):
             service = self._run(["sc.exe", "query", self._service(tunnel_name)], ok=(0, 1060))
             if service.returncode == 0 and "RUNNING" in service.stdout:
                 service_was_running = True
-                if self._handshake_completed(tunnel_name):
+                handshake = self._handshake_completed(tunnel_name)
+                if handshake is True:
+                    return None
+                if handshake is None:
+                    # Do not report a failed UDP handshake when the local
+                    # process is not permitted to inspect the interface.
                     return None
             remaining = deadline - time.monotonic()
             if remaining <= 0:

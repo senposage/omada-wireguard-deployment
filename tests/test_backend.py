@@ -85,6 +85,19 @@ class WindowsBackendTests(unittest.TestCase):
             self.assertEqual(diagnostic.code, "endpoint_unreachable")
             self.assertEqual(diagnostic.peer_removed().code, "peer_removed")
 
+    def test_permission_denied_reading_handshake_does_not_claim_udp_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = RecordingBackend(Path(temporary))
+
+            def run(args, **kwargs):
+                if args[:2] == ["sc.exe", "query"]:
+                    return subprocess.CompletedProcess(args, 0, "STATE : 4 RUNNING", "")
+                return subprocess.CompletedProcess(
+                    args, 1, "", "Unable to access interface omada: Permission denied")
+
+            backend._run = run
+            self.assertIsNone(backend.diagnose_connection("omada", timeout=0))
+
     def test_site_display_name_becomes_a_windows_safe_shortcut(self):
         with tempfile.TemporaryDirectory() as temporary:
             backend = WindowsWireGuardBackend(

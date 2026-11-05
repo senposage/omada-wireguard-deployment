@@ -65,6 +65,7 @@ def build_windows(release_version: str, output_directory: Path) -> Path:
     run(
         str(windows_csc()), "/nologo", "/target:winexe",
         f"/out:{sfx}",
+        f"/win32icon:{ROOT / 'assets' / 'omada-vpn-icon.ico'}",
         "/r:System.Windows.Forms.dll", "/r:System.IO.Compression.dll",
         "/r:System.IO.Compression.FileSystem.dll",
         str(ROOT / "sfx" / "OmadaDeploymentSfx.cs"),

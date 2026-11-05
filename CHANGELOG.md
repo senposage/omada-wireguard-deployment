@@ -2,6 +2,10 @@
 
 This project uses [Semantic Versioning](https://semver.org/). Release tags and generated artifacts use the exact release number without a `v` prefix.
 
+## 0.3.7 — 2026-11-05
+
+- Embed the Omada VPN application icon in every generated site-specific deployment executable, not only in the Deployment Generator.
+
 ## 0.3.6 — 2026-11-05
 
 - Do not report a UDP handshake failure when Windows allows the tray user to manage the WireGuard service but denies `wg.exe` access to inspect its service-owned interface.
